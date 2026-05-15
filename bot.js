@@ -14,7 +14,6 @@ const SHOP_NAME = "Billy's Shop";
 const OWNER_NUMBER = '254114245222';
 const CURRENCY = 'KES';
 
-// Products with discount eligibility
 const PRODUCTS = [
     { id: 1, name: 'Wireless Earbuds', price: 1500, category: 'Electronics', description: 'Bluetooth 5.0, 20hr battery', inStock: true, allowDiscount: true, minPrice: 1200 },
     { id: 2, name: 'Phone Case', price: 500, category: 'Accessories', description: 'Shockproof, all models', inStock: true, allowDiscount: true, minPrice: 400 },
@@ -26,7 +25,6 @@ const PRODUCTS = [
     { id: 8, name: 'Webcam HD', price: 4500, category: 'Electronics', description: '1080p, built-in mic', inStock: true, allowDiscount: false, minPrice: 4500 }
 ];
 
-// Discount codes
 const DISCOUNT_CODES = {
     'BILLY10': { discount: 0.10, type: 'percentage', description: '10% off your order' },
     'SAVE20': { discount: 0.20, type: 'percentage', description: '20% off your order' },
@@ -83,33 +81,80 @@ function getGreeting() {
 }
 
 // ============================================
+// PRODUCT FINDER
+// ============================================
+
+function findProduct(input) {
+    if (!input) return null;
+    const search = input.toLowerCase().trim();
+
+    // Try exact ID match first
+    const id = parseInt(search);
+    if (!isNaN(id)) {
+        const byId = PRODUCTS.find(p => p.id === id);
+        if (byId) return byId;
+    }
+
+    // Try exact name match
+    let product = PRODUCTS.find(p => p.name.toLowerCase() === search);
+    if (product) return product;
+
+    // Try partial name match
+    product = PRODUCTS.find(p => p.name.toLowerCase().includes(search));
+    if (product) return product;
+
+    // Try matching individual words
+    const words = search.split(/\s+/);
+    for (const word of words) {
+        if (word.length < 3) continue; // Skip short words
+        product = PRODUCTS.find(p => p.name.toLowerCase().includes(word));
+        if (product) return product;
+    }
+
+    // Try category match
+    product = PRODUCTS.find(p => p.category.toLowerCase().includes(search));
+    if (product) return product;
+
+    return null;
+}
+
+function findMultipleProducts(input) {
+    const search = input.toLowerCase().trim();
+    return PRODUCTS.filter(p => 
+        p.name.toLowerCase().includes(search) ||
+        p.category.toLowerCase().includes(search) ||
+        p.description.toLowerCase().includes(search)
+    );
+}
+
+// ============================================
 // RESPONSE BUILDERS
 // ============================================
 
 function buildWelcome() {
-    return getGreeting() + '!\n\nWelcome to ' + SHOP_NAME + '\n\nI can help you:\n' +
-           '- Browse products (ask "what do you sell")\n' +
-           '- Check prices (ask "how much is [product]")\n' +
-           '- Get price list (say "send me pricelist")\n' +
-           '- Bargain (say "can I get a discount on [product]")\n' +
-           '- Place orders (say "I want [product]")\n' +
-           '- Get info (ask "business hours" or "delivery")\n\n' +
-           'What would you like to do?';
+    return getGreeting() + '! Welcome to ' + SHOP_NAME + '\n\n' +
+           'I can help you:\n' +
+           '- Browse products (say "show products")\n' +
+           '- Get price list (say "pricelist")\n' +
+           '- Buy directly (just type product name like "laptop stand")\n' +
+           '- Bargain (say "laptop stand 900")\n' +
+           '- Ask about delivery, hours, payment\n\n' +
+           'What would you like?';
 }
 
 function buildProducts() {
-    let msg = 'Our Products:\n\n';
+    let msg = '*Our Products*\n\n';
     PRODUCTS.forEach(p => {
         const stock = p.inStock ? 'In Stock' : 'Out of Stock';
-        const discount = p.allowDiscount ? ' (Discount available)' : '';
+        const discount = p.allowDiscount ? ' *' : '';
         msg += p.id + '. ' + p.name + '\n';
         msg += '   Price: ' + formatPrice(p.price) + discount + '\n';
-        msg += '   Category: ' + p.category + '\n';
         msg += '   ' + p.description + '\n';
         msg += '   Status: ' + stock + '\n\n';
     });
-    msg += 'To order, say "I want [product name]"\n';
-    msg += 'For discounts, say "can you give me a discount on [product]"';
+    msg += '* = Discount available\n\n';
+    msg += 'To buy, just type the product name\n';
+    msg += 'Example: "laptop stand" or "i want earbuds"';
     return msg;
 }
 
@@ -129,76 +174,65 @@ function buildPriceList() {
             msg += p.id + '. ' + p.name + '\n';
             msg += '   Price: ' + formatPrice(p.price) + discount + stock + '\n';
             if (p.allowDiscount) {
-                msg += '   Bargain price: from ' + formatPrice(p.minPrice) + '\n';
+                msg += '   Bargain from: ' + formatPrice(p.minPrice) + '\n';
             }
             msg += '\n';
         });
     });
 
     msg += '============\n';
-    msg += '* = Discount/bargain available\n';
-    msg += '\nFor details, ask "tell me about [product name]"\n';
-    msg += 'To bargain, say "can I get [product] for [price]?"';
+    msg += '* = Bargain available\n\n';
+    msg += 'To buy, just type the product name\n';
+    msg += 'To bargain, type: "[product] [price]"\n';
+    msg += 'Example: "laptop stand 900" or "earbuds 1300"';
 
     return msg;
 }
 
-function buildProductDetails(nameOrId) {
-    const id = parseInt(nameOrId);
-    let p;
+function buildProductDetails(product) {
+    let msg = '*' + product.name + '*\n\n';
+    msg += 'Price: ' + formatPrice(product.price) + '\n';
+    msg += 'Category: ' + product.category + '\n';
+    msg += product.description + '\n';
+    msg += 'Status: ' + (product.inStock ? 'In Stock' : 'Out of Stock') + '\n';
 
-    if (!isNaN(id)) {
-        p = PRODUCTS.find(x => x.id === id);
-    } else {
-        const search = nameOrId.toLowerCase();
-        p = PRODUCTS.find(x => x.name.toLowerCase().includes(search));
-    }
-
-    if (!p) return 'Sorry, I could not find "' + nameOrId + '".\n\nAsk "what do you sell" to see our products.';
-
-    let msg = p.name + '\n\n';
-    msg += 'Price: ' + formatPrice(p.price) + '\n';
-    msg += 'Category: ' + p.category + '\n';
-    msg += p.description + '\n';
-    msg += 'Status: ' + (p.inStock ? 'In Stock' : 'Out of Stock') + '\n';
-
-    if (p.allowDiscount) {
+    if (product.allowDiscount) {
         msg += '\n*Discount Available!*\n';
-        msg += 'You can bargain from ' + formatPrice(p.minPrice) + '\n';
-        msg += 'Say "can you give me a discount?"\n';
+        msg += 'Bargain price from: ' + formatPrice(product.minPrice) + '\n';
+        msg += 'Type: "' + product.name + ' [your price]" to bargain\n';
+        msg += 'Example: "' + product.name + ' ' + (product.minPrice + 100) + '"';
     } else {
-        msg += '\n*Fixed Price* (no discounts)\n';
+        msg += '\n*Fixed Price* (no discounts)';
     }
 
-    msg += '\nTo buy, say "I want ' + p.name + '"';
+    msg += '\n\nTo buy now, just reply with the product name:\n';
+    msg += '"' + product.name + '"';
+
     return msg;
 }
 
 function buildSearch(term) {
-    const results = PRODUCTS.filter(p => 
-        p.name.toLowerCase().includes(term) || 
-        p.description.toLowerCase().includes(term) ||
-        p.category.toLowerCase().includes(term)
-    );
+    const results = findMultipleProducts(term);
 
     if (results.length === 0) return 'No products found for "' + term + '".';
 
-    let msg = 'Search results for "' + term + '":\n\n';
+    let msg = 'Results for "' + term + '":\n\n';
     results.forEach(p => {
         const discount = p.allowDiscount ? ' *' : '';
         msg += p.id + '. ' + p.name + ' - ' + formatPrice(p.price) + discount + '\n';
     });
-    msg += '\n* = Discount available';
+    msg += '\n* = Bargain available\n';
+    msg += 'Type product name to buy or get details';
     return msg;
 }
 
 function buildCart(session) {
     if (!session.cart || session.cart.length === 0) {
-        return 'Your cart is empty.\n\nBrowse products by asking "what do you sell"';
+        return 'Your cart is empty.\n\nBrowse products by saying "show products" or just type a product name like "laptop stand"';
     }
 
     let total = 0;
-    let msg = 'Your Cart:\n\n';
+    let msg = '*Your Cart*\n\n';
 
     session.cart.forEach((item, i) => {
         const product = PRODUCTS.find(p => p.id === item.id);
@@ -208,14 +242,13 @@ function buildCart(session) {
 
         msg += (i + 1) + '. ' + product.name + '\n';
         if (item.discountedPrice) {
-            msg += '   ~~' + formatPrice(product.price) + '~~ ' + formatPrice(item.discountedPrice) + ' (discounted)\n';
+            msg += '   ~~' + formatPrice(product.price) + '~~ ' + formatPrice(item.discountedPrice) + ' (deal)\n';
         } else {
             msg += '   ' + formatPrice(product.price) + '\n';
         }
         msg += '   Qty: ' + item.qty + ' = ' + formatPrice(subtotal) + '\n\n';
     });
 
-    // Apply discount code if any
     let finalTotal = total;
     if (session.discountCode && DISCOUNT_CODES[session.discountCode]) {
         const discount = DISCOUNT_CODES[session.discountCode];
@@ -226,41 +259,31 @@ function buildCart(session) {
     }
 
     msg += '\n*Total: ' + formatPrice(finalTotal) + '*\n\n';
-    msg += 'Say "checkout" to place your order\n';
+    msg += 'Say "checkout" to place order\n';
     msg += 'Or "apply code [CODE]" for discount';
 
     return msg;
 }
 
-function addToCart(input, session) {
-    let product;
-    let qty = 1;
-
-    // Try ID match first
-    const idMatch = input.match(/^(\d+)/);
-    if (idMatch) {
-        const id = parseInt(idMatch[1]);
-        product = PRODUCTS.find(p => p.id === id);
-        const qtyMatch = input.match(/\d+\s+(\d+)/);
-        if (qtyMatch) qty = parseInt(qtyMatch[1]);
-    } else {
-        // Search by name
-        const search = input.toLowerCase();
-        product = PRODUCTS.find(p => p.name.toLowerCase().includes(search));
-    }
-
-    if (!product) return 'Sorry, I could not find "' + input + '".';
+function addToCart(product, qty, session, discountedPrice) {
     if (!product.inStock) return 'Sorry, ' + product.name + ' is currently out of stock.';
 
     const existing = session.cart.find(item => item.id === product.id);
     if (existing) {
         existing.qty += qty;
+        if (discountedPrice) existing.discountedPrice = discountedPrice;
     } else {
-        session.cart.push({ id: product.id, qty, discountedPrice: null });
+        session.cart.push({ id: product.id, qty, discountedPrice: discountedPrice || null });
     }
 
-    return 'Added ' + qty + ' x ' + product.name + ' to your cart!\n\n' +
-           'Say "view cart" to see items, or "checkout" to order.';
+    let msg = 'Added ' + qty + ' x ' + product.name;
+    if (discountedPrice) {
+        msg += ' at ' + formatPrice(discountedPrice) + ' (deal price)';
+    }
+    msg += '!\n\n';
+    msg += 'Say "view cart" to see items\n';
+    msg += 'Or type another product name to add more';
+    return msg;
 }
 
 function removeFromCart(input, session) {
@@ -293,7 +316,7 @@ function applyDiscountCode(code, session) {
 
 function doCheckout(session) {
     if (!session.cart || session.cart.length === 0) {
-        return 'Your cart is empty.';
+        return 'Your cart is empty. Type a product name to start shopping!';
     }
 
     let total = 0;
@@ -307,7 +330,6 @@ function doCheckout(session) {
         orderDetails += product.name + ' x ' + item.qty + ' = ' + formatPrice(subtotal) + '\n';
     });
 
-    // Apply discount code
     let finalTotal = total;
     let discountInfo = '';
     if (session.discountCode && DISCOUNT_CODES[session.discountCode]) {
@@ -327,15 +349,14 @@ function doCheckout(session) {
         date: new Date() 
     });
 
-    // Clear cart and discount
     session.cart = [];
     session.discountCode = null;
 
-    let msg = 'Order Placed Successfully!\n\n';
+    let msg = '*Order Placed Successfully!*\n\n';
     msg += 'Order ID: ' + orderId + '\n';
     msg += 'Items:\n' + orderDetails + '\n';
     if (discountInfo) msg += discountInfo + '\n';
-    msg += 'Total: ' + formatPrice(finalTotal) + '\n\n';
+    msg += '*Total: ' + formatPrice(finalTotal) + '*\n\n';
     msg += 'Payment Options:\n' + PAYMENT_METHODS.join('\n') + '\n\n';
     msg += 'Send payment confirmation to +' + OWNER_NUMBER;
 
@@ -343,75 +364,88 @@ function doCheckout(session) {
 }
 
 // BARGAINING FUNCTION
-function handleBargain(input, session) {
-    // Extract product and offered price
-    const bargainMatch = input.match(/(?:can i get|give me|sell me|how about|what about|i'll take)\s+(.+?)\s+(?:for|at)\s+(?:kes\s+)?(\d+)/i);
-
-    if (!bargainMatch) {
-        // Just asking about discount without specific price
-        const productMatch = input.match(/(?:discount on|bargain for|cheaper price for|reduce price of)\s+(.+)/i);
-        if (productMatch) {
-            const product = findProduct(productMatch[1]);
-            if (!product) return 'Sorry, I could not find that product.';
-            if (!product.allowDiscount) return 'Sorry, ' + product.name + ' is already at the best price. No discounts available.';
-            if (!product.inStock) return 'Sorry, ' + product.name + ' is out of stock.';
-
-            session.bargainingProduct = product.id;
-            return product.name + '\n\n' +
-                   'Original price: ' + formatPrice(product.price) + '\n' +
-                   'Lowest I can go: ' + formatPrice(product.minPrice) + '\n\n' +
-                   'What price did you have in mind?\n' +
-                   'Say something like "I will take it for ' + formatPrice(product.minPrice + 100) + '"';
-        }
-
-        return 'To bargain, say:\n' +
-               '"Can I get [product] for [price]?"\n' +
-               'Example: "Can I get earbuds for 1300?"';
-    }
-
-    const productName = bargainMatch[1];
-    const offeredPrice = parseInt(bargainMatch[2]);
+function handleBargain(productName, offeredPrice, session) {
     const product = findProduct(productName);
 
-    if (!product) return 'Sorry, I could not find "' + productName + '".';
-    if (!product.allowDiscount) return 'Sorry, ' + product.name + ' is fixed at ' + formatPrice(product.price) + '. No discounts available.';
-    if (!product.inStock) return 'Sorry, ' + product.name + ' is out of stock.';
+    if (!product) {
+        return 'Sorry, I could not find "' + productName + '".\n\n' +
+               'Type "show products" to see what we have.';
+    }
+
+    if (!product.inStock) {
+        return 'Sorry, ' + product.name + ' is currently out of stock.';
+    }
+
+    if (!product.allowDiscount) {
+        return 'Sorry, ' + product.name + ' is fixed at ' + formatPrice(product.price) + '.\n' +
+               'No discounts available on this item.';
+    }
 
     // Check if offered price is acceptable
     if (offeredPrice >= product.minPrice) {
         // Accept the offer
+        const savings = product.price - offeredPrice;
         const existing = session.cart.find(item => item.id === product.id);
+
         if (existing) {
             existing.discountedPrice = offeredPrice;
+            existing.qty = 1;
         } else {
             session.cart.push({ id: product.id, qty: 1, discountedPrice: offeredPrice });
         }
 
-        const savings = product.price - offeredPrice;
-        return 'Deal! ' + product.name + ' for ' + formatPrice(offeredPrice) + '\n' +
+        return '*Deal!* ' + product.name + ' for ' + formatPrice(offeredPrice) + '\n' +
                'You saved ' + formatPrice(savings) + '!\n\n' +
-               'Added to your cart. Say "view cart" to checkout.';
+               'Added to your cart.\n' +
+               'Say "view cart" to checkout or type another product.';
     } else {
         // Counter offer
         const counterPrice = Math.round((product.price + offeredPrice) / 2);
+        if (counterPrice < product.minPrice) {
+            return 'Sorry, ' + formatPrice(offeredPrice) + ' is too low for ' + product.name + '.\n\n' +
+                   'Lowest I can go: ' + formatPrice(product.minPrice) + '\n\n' +
+                   'Type: "' + product.name + ' ' + product.minPrice + '" to accept minimum price.';
+        }
+
         session.bargainingProduct = product.id;
 
         return 'Hmm, ' + formatPrice(offeredPrice) + ' is too low for ' + product.name + '.\n\n' +
-               'How about ' + formatPrice(counterPrice) + '?\n' +
-               'Say "yes" to accept or "how about [price]" to counter.';
+               'How about ' + formatPrice(counterPrice) + '?\n\n' +
+               'Reply:\n' +
+               '"yes" - to accept ' + formatPrice(counterPrice) + '\n' +
+               '"' + product.name + ' [price]" - to counter offer';
     }
 }
 
-function findProduct(nameOrId) {
-    const id = parseInt(nameOrId);
-    if (!isNaN(id)) {
-        return PRODUCTS.find(x => x.id === id);
+function acceptCounterOffer(session) {
+    if (!session.bargainingProduct) {
+        return 'No active bargain. Type a product name to start shopping.';
     }
-    return PRODUCTS.find(p => p.name.toLowerCase().includes(nameOrId.toLowerCase()));
+
+    const product = PRODUCTS.find(p => p.id === session.bargainingProduct);
+    if (!product) return 'Product not found.';
+
+    // Calculate the counter price that was offered
+    const counterPrice = Math.round((product.price + product.minPrice) / 2);
+    const finalPrice = Math.max(counterPrice, product.minPrice);
+
+    const existing = session.cart.find(item => item.id === product.id);
+    if (existing) {
+        existing.discountedPrice = finalPrice;
+        existing.qty = 1;
+    } else {
+        session.cart.push({ id: product.id, qty: 1, discountedPrice: finalPrice });
+    }
+
+    session.bargainingProduct = null;
+
+    return '*Deal!* ' + product.name + ' for ' + formatPrice(finalPrice) + '\n\n' +
+           'Added to your cart.\n' +
+           'Say "view cart" to checkout or type another product.';
 }
 
 function buildHours() {
-    let msg = 'Business Hours:\n\n';
+    let msg = '*Business Hours*\n\n';
     Object.entries(BUSINESS_HOURS).forEach(([day, hours]) => {
         msg += day.charAt(0).toUpperCase() + day.slice(1) + ': ' + hours + '\n';
     });
@@ -419,57 +453,57 @@ function buildHours() {
 }
 
 function buildDelivery() {
-    return 'Delivery Information:\n\n' +
-           'We deliver within Nairobi for KES 200\n' +
+    return '*Delivery Information*\n\n' +
+           'Within Nairobi: KES 200\n' +
            'Outside Nairobi: KES 500\n\n' +
            'Delivery time: 1-3 business days\n' +
            'Same-day delivery for orders before 2 PM';
 }
 
 function buildPayment() {
-    return 'Payment Methods:\n\n' + PAYMENT_METHODS.join('\n') + '\n\n' +
+    return '*Payment Methods*\n\n' + PAYMENT_METHODS.join('\n') + '\n\n' +
            'After payment, send confirmation to this number.';
 }
 
 function buildContact() {
-    return 'Contact Us:\n\n' +
+    return '*Contact Us*\n\n' +
            'Phone/WhatsApp: +' + OWNER_NUMBER + '\n' +
            'Location: Nairobi, Kenya\n\n' +
            'Say "I need help" to speak with a person.';
 }
 
 function buildFAQ() {
-    return 'Frequently Asked Questions:\n\n' +
+    return '*Frequently Asked Questions*\n\n' +
            'Q: How long does delivery take?\n' +
            'A: 1-3 days in Nairobi\n\n' +
            'Q: Can I return items?\n' +
            'A: Yes, within 7 days with receipt\n\n' +
            'Q: Do you offer discounts?\n' +
-           'A: Yes! Some products are negotiable. Ask "can I get a discount?"\n\n' +
+           'A: Yes! Some products are negotiable.\n' +
+           '   Just type: "[product] [price]"\n\n' +
            'Q: Minimum order amount?\n' +
            'A: No minimum!';
 }
 
 function buildHelp() {
-    return 'How to Use This Shop:\n\n' +
-           'Shopping:\n' +
-           '- "what do you sell" - Browse products\n' +
-           '- "send me pricelist" - Get price list\n' +
-           '- "how much is power bank" - Check price\n' +
-           '- "I want earbuds" - Add to cart\n' +
+    return '*How to Shop*\n\n' +
+           '*Browse:*\n' +
+           '- "show products" - See all products\n' +
+           '- "pricelist" - Get price list\n' +
+           '- "search [name]" - Find products\n\n' +
+           '*Buy (easiest):*\n' +
+           '- Just type product name: "laptop stand"\n' +
+           '- "i want earbuds"\n' +
+           '- "buy 2 phone case"\n\n' +
+           '*Bargain:*\n' +
+           '- "laptop stand 900"\n' +
+           '- "can I get earbuds for 1300"\n\n' +
+           '*Cart & Checkout:*\n' +
            '- "view cart" - See your cart\n' +
-           '- "checkout" - Place order\n\n' +
-           'Bargaining & Discounts:\n' +
-           '- "can I get earbuds for 1300" - Bargain\n' +
-           '- "any discount on phone case" - Ask discount\n' +
-           '- "apply code BILLY10" - Use discount code\n\n' +
-           'Info:\n' +
-           '- "business hours" - Opening times\n' +
-           '- "do you deliver" - Delivery info\n' +
-           '- "payment options" - How to pay\n\n' +
-           'Support:\n' +
-           '- "faq" - Common questions\n' +
-           '- "I need help" - Talk to human';
+           '- "checkout" - Place order\n' +
+           '- "apply code BILLY10" - Discount\n\n' +
+           '*Info:*\n' +
+           '- "hours", "delivery", "payment"';
 }
 
 // ============================================
@@ -477,31 +511,32 @@ function buildHelp() {
 // ============================================
 
 function processMessage(text, session) {
-    text = text.trim().toLowerCase();
+    text = text.trim();
+    const lowerText = text.toLowerCase();
 
     // Greetings
-    if (/^(hi|hello|hey|hola|yo|good morning|good afternoon|good evening|howdy)/.test(text)) {
+    if (/^(hi|hello|hey|hola|yo|good morning|good afternoon|good evening|howdy)/i.test(text)) {
         return buildWelcome();
     }
 
     // Help
-    if (/^(help|menu|commands|how to|how do i|what can you do)/.test(text)) {
+    if (/^(help|menu|commands|how to|how do i|what can you do|show me how)/i.test(text)) {
         return buildHelp();
     }
 
     // Price list
-    if (/(pricelist|price list|send me prices|all prices|catalog|price catalog)/.test(text)) {
+    if (/(pricelist|price list|send me prices|all prices|price catalog|prices)/i.test(text)) {
         return buildPriceList();
     }
 
     // Products
-    if (/(what do you sell|show me products|what products|list products|what do you have|what's available|show everything)/.test(text)) {
+    if (/(show products|what do you sell|list products|what do you have|what's available|show everything|catalog)/i.test(text)) {
         return buildProducts();
     }
 
     // Categories
-    if (/(categories|types of products|what categories|sections)/.test(text)) {
-        let msg = 'Categories:\n\n';
+    if (/(categories|types of products|what categories|sections)/i.test(text)) {
+        let msg = '*Categories*\n\n';
         const cats = [...new Set(PRODUCTS.map(p => p.category))];
         cats.forEach((cat, i) => {
             const count = PRODUCTS.filter(p => p.category === cat).length;
@@ -511,35 +546,25 @@ function processMessage(text, session) {
     }
 
     // Search
-    const searchMatch = text.match(/(?:search|find|look for|do you have|got any)\s+(.+)/);
+    const searchMatch = text.match(/(?:search|find|look for|do you have|got any)\s+(.+)/i);
     if (searchMatch) {
         return buildSearch(searchMatch[1].trim());
     }
 
-    // Product details
-    const detailMatch = text.match(/(?:tell me about|details on|info about|what is|describe)\s+(.+)/);
+    // Product details request
+    const detailMatch = text.match(/(?:tell me about|details on|info about|what is|describe)\s+(.+)/i);
     if (detailMatch) {
-        return buildProductDetails(detailMatch[1].trim());
+        const product = findProduct(detailMatch[1].trim());
+        if (product) return buildProductDetails(product);
+        return 'Sorry, I could not find "' + detailMatch[1] + '".';
     }
 
     // Price check
-    const priceMatch = text.match(/(?:how much is|what's the price of|price of|cost of|how much for)\s+(.+)/);
+    const priceMatch = text.match(/(?:how much is|what's the price of|price of|cost of|how much for)\s+(.+)/i);
     if (priceMatch) {
-        return buildProductDetails(priceMatch[1].trim());
-    }
-
-    // Bargaining
-    if (/(bargain|discount|cheaper|reduce price|lower price|negotiate|best price|deal|offer)/.test(text)) {
-        return handleBargain(text, session);
-    }
-
-    // Accept bargain counter
-    if (/^(yes|okay|ok|deal|sure|fine|accepted)/.test(text) && session.bargainingProduct) {
-        const product = PRODUCTS.find(p => p.id === session.bargainingProduct);
-        session.bargainingProduct = null;
-        if (product) {
-            return 'Great! ' + product.name + ' has been added to your cart at the agreed price.\n\nSay "view cart" to checkout.';
-        }
+        const product = findProduct(priceMatch[1].trim());
+        if (product) return buildProductDetails(product);
+        return 'Sorry, I could not find "' + priceMatch[1] + '".';
     }
 
     // Apply discount code
@@ -548,105 +573,184 @@ function processMessage(text, session) {
         return applyDiscountCode(codeMatch[1], session);
     }
 
-    // Add to cart
-    const buyPatterns = [
-        /^(?:i want|i'd like|give me|add|buy|purchase|get)\s+(.+)/,
-        /^(?:add\s+)(\d+)\s+(?:of\s+)?(.+)/,
-        /^(?:i want)\s+(\d+)\s+(?:pieces?|units?|qty|of)\s+(.+)/
-    ];
-
-    for (const pattern of buyPatterns) {
-        const match = text.match(pattern);
-        if (match) {
-            if (match[2]) {
-                return addToCart(match[1] + ' ' + match[2], session);
-            }
-            return addToCart(match[1], session);
-        }
-    }
-
     // View cart
-    if (/(view cart|show cart|my cart|what's in my cart|cart items)/.test(text)) {
+    if (/(view cart|show cart|my cart|what's in my cart|cart items)/i.test(text)) {
         return buildCart(session);
     }
 
     // Remove from cart
-    const removeMatch = text.match(/(?:remove|delete|take out)\s+(?:item\s+)?(\d+|.+)/);
+    const removeMatch = text.match(/(?:remove|delete|take out)\s+(?:item\s+)?(\d+|.+)/i);
     if (removeMatch) {
         return removeFromCart(removeMatch[1], session);
     }
 
     // Checkout
-    if (/(checkout|place order|complete order|pay|i'm ready|finish order)/.test(text)) {
+    if (/(checkout|place order|complete order|pay|i'm ready|finish order)/i.test(text)) {
         return doCheckout(session);
     }
 
+    // Accept bargain counter
+    if (/^(yes|okay|ok|deal|sure|fine|accepted|accept)/i.test(text) && session.bargainingProduct) {
+        return acceptCounterOffer(session);
+    }
+
+    // Decline bargain
+    if (/^(no|nope|not interested|decline|pass)/i.test(text) && session.bargainingProduct) {
+        session.bargainingProduct = null;
+        return 'No problem! Type a product name to continue shopping or "show products" to browse.';
+    }
+
     // Business hours
-    if (/(business hours|opening hours|when are you open|what time|hours of operation|are you open)/.test(text)) {
+    if (/(business hours|opening hours|when are you open|what time|hours of operation|are you open)/i.test(text)) {
         return buildHours();
     }
 
     // Location
-    if (/(where are you|location|address|where is the shop|how to find you|directions)/.test(text)) {
-        return 'Our Location:\n\nNairobi, Kenya\n\nWe offer delivery services. Ask "do you deliver" for details.';
+    if (/(where are you|location|address|where is the shop|how to find you|directions)/i.test(text)) {
+        return '*Our Location*\n\nNairobi, Kenya\n\nWe offer delivery services. Ask "do you deliver" for details.';
     }
 
     // Delivery
-    if (/(delivery|shipping|do you deliver|deliver to|send to|courier)/.test(text)) {
+    if (/(delivery|shipping|do you deliver|deliver to|send to|courier)/i.test(text)) {
         return buildDelivery();
     }
 
     // Payment
-    if (/(payment|how do i pay|pay with|mpesa|bank transfer|cash|payment methods)/.test(text)) {
+    if (/(payment|how do i pay|pay with|mpesa|bank transfer|cash|payment methods)/i.test(text)) {
         return buildPayment();
     }
 
     // Contact
-    if (/(contact|phone|call|reach you|whatsapp|how to contact)/.test(text)) {
+    if (/(contact|phone|call|reach you|whatsapp|how to contact)/i.test(text)) {
         return buildContact();
     }
 
     // FAQ
-    if (/(faq|frequently asked|common questions|questions)/.test(text)) {
+    if (/(faq|frequently asked|common questions|questions)/i.test(text)) {
         return buildFAQ();
     }
 
     // Track order
     const trackMatch = text.match(/(?:track|status of|where is my|check)\s+(?:order\s+)?(ord-\d+|\d+)/i);
     if (trackMatch) {
-        return 'Order Tracking: ' + trackMatch[1].toUpperCase() + '\n\n' +
+        return '*Order Tracking: ' + trackMatch[1].toUpperCase() + '*\n\n' +
                'Status: Out for Delivery\n' +
                'Estimated: Today by 6 PM';
     }
 
     // Human support
-    if (/(human|person|real person|agent|representative|i need help|speak to someone|talk to someone|support)/.test(text)) {
-        return 'Connecting to Human Support:\n\n' +
+    if (/(human|person|real person|agent|representative|i need help|speak to someone|talk to someone|support)/i.test(text)) {
+        return '*Connecting to Human Support*\n\n' +
                'A representative will contact you shortly.\n\n' +
                'For urgent matters, call: +' + OWNER_NUMBER;
     }
 
     // Thanks
-    if (/(thank|thanks|asante|shukran|grateful)/.test(text)) {
+    if (/(thank|thanks|asante|shukran|grateful)/i.test(text)) {
         return 'You are very welcome!\n\n' +
                'Thanks for choosing ' + SHOP_NAME + '. Have a great day!\n\n' +
                'Feel free to message anytime for more shopping.';
     }
 
     // Goodbye
-    if (/(bye|goodbye|see you|later|talk soon|have a good one)/.test(text)) {
+    if (/(bye|goodbye|see you|later|talk soon|have a good one)/i.test(text)) {
         return 'Goodbye! Thanks for visiting ' + SHOP_NAME + '.\n\n' +
                'We are here whenever you need us. Have a wonderful day!';
     }
 
-    // Fallback
-    return 'I am not sure I understood that.\n\n' +
-           'I can help you with:\n' +
-           '- Shopping: "what do you sell"\n' +
-           '- Prices: "send me pricelist"\n' +
-           '- Bargain: "can I get discount on [product]"\n' +
-           '- Help: "I need help"\n\n' +
-           'Or type "help" to see all options.';
+    // ============================================
+    // BARGAINING PATTERNS (check before direct product)
+    // ============================================
+
+    // Pattern: "product name price" (e.g., "laptop stand 900")
+    const bargainPattern1 = text.match(/^([a-z\s]+)\s+(\d+)$/i);
+    if (bargainPattern1) {
+        const productName = bargainPattern1[1].trim();
+        const offeredPrice = parseInt(bargainPattern1[2]);
+        const product = findProduct(productName);
+
+        if (product) {
+            return handleBargain(productName, offeredPrice, session);
+        }
+    }
+
+    // Pattern: "can I get [product] for/at [price]"
+    const bargainPattern2 = text.match(/(?:can i get|give me|sell me|how about|what about|i'll take)\s+(.+?)\s+(?:for|at)\s+(?:kes\s+)?(\d+)/i);
+    if (bargainPattern2) {
+        return handleBargain(bargainPattern2[1].trim(), parseInt(bargainPattern2[2]), session);
+    }
+
+    // Pattern: "discount on [product]"
+    const discountPattern = text.match(/(?:discount on|bargain for|cheaper price for|reduce price of)\s+(.+)/i);
+    if (discountPattern) {
+        const product = findProduct(discountPattern[1].trim());
+        if (!product) return 'Sorry, I could not find that product.';
+        if (!product.allowDiscount) return 'Sorry, ' + product.name + ' is fixed at ' + formatPrice(product.price) + '. No discounts available.';
+        if (!product.inStock) return 'Sorry, ' + product.name + ' is out of stock.';
+
+        session.bargainingProduct = product.id;
+        return '*' + product.name + '*\n\n' +
+               'Original price: ' + formatPrice(product.price) + '\n' +
+               'Lowest I can go: ' + formatPrice(product.minPrice) + '\n\n' +
+               'What price did you have in mind?\n' +
+               'Type: "' + product.name + ' [your price]"\n' +
+               'Example: "' + product.name + ' ' + (product.minPrice + 100) + '"';
+    }
+
+    // ============================================
+    // DIRECT PRODUCT NAME (e.g., "laptop stand", "earbuds")
+    // ============================================
+
+    const directProduct = findProduct(text);
+    if (directProduct) {
+        // Check if it's a buy request with quantity
+        const qtyMatch = text.match(/(\d+)\s*(?:pieces?|units?|qty)?/);
+        const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+        return addToCart(directProduct, qty, session, null);
+    }
+
+    // Buy patterns with "i want", "buy", etc.
+    const buyPatterns = [
+        /^(?:i want|i'd like|give me|add|buy|purchase|get|need)\s+(.+)/i,
+        /^(?:add\s+)(\d+)\s+(?:of\s+)?(.+)/i,
+        /^(?:i want)\s+(\d+)\s+(?:pieces?|units?|qty|of)\s+(.+)/i
+    ];
+
+    for (const pattern of buyPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+            let productInput, qty = 1;
+
+            if (match[2]) {
+                // Pattern with quantity and product
+                qty = parseInt(match[1]) || 1;
+                productInput = match[2].trim();
+            } else {
+                productInput = match[1].trim();
+            }
+
+            const product = findProduct(productInput);
+            if (product) {
+                return addToCart(product, qty, session, null);
+            }
+
+            // If product not found, suggest search
+            return 'Sorry, I could not find "' + productInput + '".\n\n' +
+                   'Type "show products" to see what we have, or "search [name]" to find items.';
+        }
+    }
+
+    // ============================================
+    // FALLBACK
+    // ============================================
+
+    return 'I am not sure I understood "' + text + '".\n\n' +
+           'Try:\n' +
+           '- Type a product name: "laptop stand"\n' +
+           '- "show products" to browse\n' +
+           '- "laptop stand 900" to bargain\n' +
+           '- "help" for all options';
 }
 
 // ============================================
@@ -714,7 +818,7 @@ async function startBot() {
 }
 
 // ============================================
-// SIMPLE FRONTEND
+// FRONTEND
 // ============================================
 
 app.get('/', async (req, res) => {
