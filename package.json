@@ -1,1 +1,15 @@
 
+{
+  "name": "whatsapp-shop-bot",
+  "version": "1.0.0",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.6.0",
+    "qrcode": "^1.5.3",
+    "express": "^4.18.2",
+    "pino": "^8.17.0"
+  }
+}
