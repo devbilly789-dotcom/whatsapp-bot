@@ -1,4 +1,4 @@
-'''{
+{
   "name": "whatsapp-bot",
   "version": "1.0.0",
   "main": "bot.js",
@@ -12,4 +12,3 @@
     "pino": "^8.17.0"
   }
 }
-''
