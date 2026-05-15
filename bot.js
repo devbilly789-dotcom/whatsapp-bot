@@ -9,6 +9,10 @@ const PORT = process.env.PORT || 3000;
 const OWNER_NUMBER = '254114245222';
 const PREFIX = '!';
 
+let currentQR = null;
+let sock = null;
+let botReady = false;
+
 const commands = {
     help: () => `*🤖 WhatsApp Bot*\n\n!help - Menu\n!time - Time\n!joke - Joke\n!echo <text> - Repeat\n!weather <city> - Weather\n!calc <expr> - Calculator\n!coin - Flip coin`,
     time: () => `🕐 ${new Date().toLocaleString()}`,
@@ -26,16 +30,12 @@ const commands = {
     coin: () => `🪙 ${Math.random() > 0.5 ? 'Heads' : 'Tails'}`
 };
 
-let sock = null;
-let botReady = false;
-
 async function startBot() {
     console.log('🚀 Starting WhatsApp Bot...');
     
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     const { version } = await fetchLatestBaileysVersion();
     
-    // Use pino logger to fix the compatibility issue
     const logger = pino({ level: 'silent' });
     
     sock = makeWASocket({
@@ -49,19 +49,21 @@ async function startBot() {
     
     sock.ev.on('connection.update', ({ connection, qr }) => {
         if (qr) {
-            console.log('\n📲 SCAN QR CODE WITH WHATSAPP\n');
+            currentQR = qr;
+            console.log('\n📲 QR CODE GENERATED - Visit /qr to see it\n');
+            // Generate smaller QR in terminal
             qrcode.generate(qr, { small: true });
         }
         if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut);
-            console.log('❌ Disconnected. Reconnecting:', shouldReconnect);
             botReady = false;
-            if (shouldReconnect) setTimeout(startBot, 5000);
+            currentQR = null;
+            setTimeout(startBot, 5000);
         }
         if (connection === 'open') {
             console.log('\n✅ BOT CONNECTED!');
             console.log('📱 Number:', sock.user.id.split(':')[0]);
             botReady = true;
+            currentQR = null;
         }
     });
 
@@ -85,10 +87,55 @@ async function startBot() {
     });
 }
 
-app.get('/', (req, res) => res.json({ status: botReady ? 'online' : 'connecting' }));
+// Web routes
+app.get('/', (req, res) => {
+    res.json({ 
+        status: botReady ? 'online' : 'connecting', 
+        bot: '🤖 WhatsApp Bot',
+        owner: OWNER_NUMBER,
+        qr_available: !!currentQR,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Show QR code as text
+app.get('/qr', (req, res) => {
+    if (!currentQR) {
+        return res.send(`
+            <html>
+                <body style="font-family: Arial; padding: 40px; text-align: center;">
+                    <h2>🤖 WhatsApp Bot</h2>
+                    <p>Status: ${botReady ? '✅ Connected' : '⏳ Connecting...'}</p>
+                    ${botReady ? '<p>Bot is already connected!</p>' : '<p>QR code not available yet. Refresh in a few seconds.</p>'}
+                </body>
+            </html>
+        `);
+    }
+    
+    // Generate QR as ASCII art for easy scanning
+    const qrAscii = qrcode.generate(currentQR, { small: true });
+    
+    res.send(`
+        <html>
+            <body style="font-family: monospace; padding: 20px; background: #000; color: #fff;">
+                <h2 style="text-align: center;">📲 Scan with WhatsApp</h2>
+                <pre style="font-size: 8px; line-height: 8px; text-align: center;">${qrAscii}</pre>
+                <p style="text-align: center;">Open WhatsApp → Settings → Linked Devices → Link a Device</p>
+            </body>
+        </html>
+    `);
+});
+
+// Alternative: show QR as data URL
+app.get('/qr-image', (req, res) => {
+    if (!currentQR) return res.json({ error: 'No QR available' });
+    res.json({ qr: currentQR });
+});
+
 app.get('/health', (req, res) => res.json({ status: 'ok', botReady }));
 
 app.listen(PORT, () => {
     console.log(`🌐 Server running on port ${PORT}`);
+    console.log(`📱 Visit: https://your-render-url.onrender.com/qr to see QR code`);
     startBot();
 });
