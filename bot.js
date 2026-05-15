@@ -6,21 +6,33 @@ const pino = require('pino');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// SHOP CONFIG
+// ============================================
+// SHOP CONFIGURATION
+// ============================================
+
 const SHOP_NAME = "Billy's Shop";
 const OWNER_NUMBER = '254114245222';
 const CURRENCY = 'KES';
 
+// Products with discount eligibility
 const PRODUCTS = [
-    { id: 1, name: 'Wireless Earbuds', price: 1500, category: 'Electronics', description: 'Bluetooth 5.0, 20hr battery', inStock: true },
-    { id: 2, name: 'Phone Case', price: 500, category: 'Accessories', description: 'Shockproof, all models', inStock: true },
-    { id: 3, name: 'Power Bank 20000mAh', price: 2500, category: 'Electronics', description: 'Fast charging, dual USB', inStock: true },
-    { id: 4, name: 'USB-C Cable', price: 300, category: 'Accessories', description: 'Braided, 2 meters', inStock: true },
-    { id: 5, name: 'Screen Protector', price: 400, category: 'Accessories', description: 'Tempered glass', inStock: false },
-    { id: 6, name: 'Bluetooth Speaker', price: 3500, category: 'Electronics', description: 'Waterproof, 12hr playtime', inStock: true },
-    { id: 7, name: 'Laptop Stand', price: 1200, category: 'Office', description: 'Adjustable, aluminum', inStock: true },
-    { id: 8, name: 'Webcam HD', price: 4500, category: 'Electronics', description: '1080p, built-in mic', inStock: true }
+    { id: 1, name: 'Wireless Earbuds', price: 1500, category: 'Electronics', description: 'Bluetooth 5.0, 20hr battery', inStock: true, allowDiscount: true, minPrice: 1200 },
+    { id: 2, name: 'Phone Case', price: 500, category: 'Accessories', description: 'Shockproof, all models', inStock: true, allowDiscount: true, minPrice: 400 },
+    { id: 3, name: 'Power Bank 20000mAh', price: 2500, category: 'Electronics', description: 'Fast charging, dual USB', inStock: true, allowDiscount: false, minPrice: 2500 },
+    { id: 4, name: 'USB-C Cable', price: 300, category: 'Accessories', description: 'Braided, 2 meters', inStock: true, allowDiscount: true, minPrice: 250 },
+    { id: 5, name: 'Screen Protector', price: 400, category: 'Accessories', description: 'Tempered glass', inStock: false, allowDiscount: true, minPrice: 350 },
+    { id: 6, name: 'Bluetooth Speaker', price: 3500, category: 'Electronics', description: 'Waterproof, 12hr playtime', inStock: true, allowDiscount: true, minPrice: 3000 },
+    { id: 7, name: 'Laptop Stand', price: 1200, category: 'Office', description: 'Adjustable, aluminum', inStock: true, allowDiscount: true, minPrice: 1000 },
+    { id: 8, name: 'Webcam HD', price: 4500, category: 'Electronics', description: '1080p, built-in mic', inStock: true, allowDiscount: false, minPrice: 4500 }
 ];
+
+// Discount codes
+const DISCOUNT_CODES = {
+    'BILLY10': { discount: 0.10, type: 'percentage', description: '10% off your order' },
+    'SAVE20': { discount: 0.20, type: 'percentage', description: '20% off your order' },
+    'WELCOME': { discount: 0.15, type: 'percentage', description: '15% off for new customers' },
+    'FLASH50': { discount: 0.50, type: 'percentage', description: '50% flash sale (limited time)' }
+};
 
 const BUSINESS_HOURS = {
     monday: '8:00 AM - 6:00 PM',
@@ -51,7 +63,9 @@ function getSession(jid) {
             cart: [],
             lastActivity: Date.now(),
             awaiting: null,
-            orderHistory: []
+            orderHistory: [],
+            discountCode: null,
+            bargainingProduct: null
         };
     }
     return customerSessions[jid];
@@ -68,11 +82,16 @@ function getGreeting() {
     return 'Good evening';
 }
 
+// ============================================
 // RESPONSE BUILDERS
+// ============================================
+
 function buildWelcome() {
     return getGreeting() + '!\n\nWelcome to ' + SHOP_NAME + '\n\nI can help you:\n' +
            '- Browse products (ask "what do you sell")\n' +
            '- Check prices (ask "how much is [product]")\n' +
+           '- Get price list (say "send me pricelist")\n' +
+           '- Bargain (say "can I get a discount on [product]")\n' +
            '- Place orders (say "I want [product]")\n' +
            '- Get info (ask "business hours" or "delivery")\n\n' +
            'What would you like to do?';
@@ -81,14 +100,46 @@ function buildWelcome() {
 function buildProducts() {
     let msg = 'Our Products:\n\n';
     PRODUCTS.forEach(p => {
-        const stock = p.inStock ? 'Yes' : 'No';
+        const stock = p.inStock ? 'In Stock' : 'Out of Stock';
+        const discount = p.allowDiscount ? ' (Discount available)' : '';
         msg += p.id + '. ' + p.name + '\n';
-        msg += '   Price: ' + formatPrice(p.price) + '\n';
+        msg += '   Price: ' + formatPrice(p.price) + discount + '\n';
         msg += '   Category: ' + p.category + '\n';
         msg += '   ' + p.description + '\n';
-        msg += '   In Stock: ' + stock + '\n\n';
+        msg += '   Status: ' + stock + '\n\n';
     });
-    msg += 'To order, say "I want [product name]" or "buy [number]"';
+    msg += 'To order, say "I want [product name]"\n';
+    msg += 'For discounts, say "can you give me a discount on [product]"';
+    return msg;
+}
+
+function buildPriceList() {
+    let msg = '*PRICE LIST*\n';
+    msg += '============\n\n';
+
+    const categories = [...new Set(PRODUCTS.map(p => p.category))];
+
+    categories.forEach(cat => {
+        msg += cat.toUpperCase() + ':\n';
+        msg += '-'.repeat(cat.length + 1) + '\n';
+
+        PRODUCTS.filter(p => p.category === cat).forEach(p => {
+            const stock = p.inStock ? '' : ' [OUT OF STOCK]';
+            const discount = p.allowDiscount ? ' *' : '';
+            msg += p.id + '. ' + p.name + '\n';
+            msg += '   Price: ' + formatPrice(p.price) + discount + stock + '\n';
+            if (p.allowDiscount) {
+                msg += '   Bargain price: from ' + formatPrice(p.minPrice) + '\n';
+            }
+            msg += '\n';
+        });
+    });
+
+    msg += '============\n';
+    msg += '* = Discount/bargain available\n';
+    msg += '\nFor details, ask "tell me about [product name]"\n';
+    msg += 'To bargain, say "can I get [product] for [price]?"';
+
     return msg;
 }
 
@@ -109,8 +160,17 @@ function buildProductDetails(nameOrId) {
     msg += 'Price: ' + formatPrice(p.price) + '\n';
     msg += 'Category: ' + p.category + '\n';
     msg += p.description + '\n';
-    msg += 'In Stock: ' + (p.inStock ? 'Yes' : 'No') + '\n\n';
-    msg += 'To buy, say "I want ' + p.name + '"';
+    msg += 'Status: ' + (p.inStock ? 'In Stock' : 'Out of Stock') + '\n';
+
+    if (p.allowDiscount) {
+        msg += '\n*Discount Available!*\n';
+        msg += 'You can bargain from ' + formatPrice(p.minPrice) + '\n';
+        msg += 'Say "can you give me a discount?"\n';
+    } else {
+        msg += '\n*Fixed Price* (no discounts)\n';
+    }
+
+    msg += '\nTo buy, say "I want ' + p.name + '"';
     return msg;
 }
 
@@ -125,8 +185,10 @@ function buildSearch(term) {
 
     let msg = 'Search results for "' + term + '":\n\n';
     results.forEach(p => {
-        msg += p.id + '. ' + p.name + ' - ' + formatPrice(p.price) + '\n';
+        const discount = p.allowDiscount ? ' *' : '';
+        msg += p.id + '. ' + p.name + ' - ' + formatPrice(p.price) + discount + '\n';
     });
+    msg += '\n* = Discount available';
     return msg;
 }
 
@@ -137,15 +199,36 @@ function buildCart(session) {
 
     let total = 0;
     let msg = 'Your Cart:\n\n';
+
     session.cart.forEach((item, i) => {
         const product = PRODUCTS.find(p => p.id === item.id);
-        const subtotal = product.price * item.qty;
+        const price = item.discountedPrice || product.price;
+        const subtotal = price * item.qty;
         total += subtotal;
+
         msg += (i + 1) + '. ' + product.name + '\n';
-        msg += '   ' + item.qty + ' x ' + formatPrice(product.price) + ' = ' + formatPrice(subtotal) + '\n';
+        if (item.discountedPrice) {
+            msg += '   ~~' + formatPrice(product.price) + '~~ ' + formatPrice(item.discountedPrice) + ' (discounted)\n';
+        } else {
+            msg += '   ' + formatPrice(product.price) + '\n';
+        }
+        msg += '   Qty: ' + item.qty + ' = ' + formatPrice(subtotal) + '\n\n';
     });
-    msg += '\nTotal: ' + formatPrice(total) + '\n\n';
-    msg += 'Say "checkout" to place your order';
+
+    // Apply discount code if any
+    let finalTotal = total;
+    if (session.discountCode && DISCOUNT_CODES[session.discountCode]) {
+        const discount = DISCOUNT_CODES[session.discountCode];
+        const savings = Math.round(total * discount.discount);
+        finalTotal = total - savings;
+        msg += 'Subtotal: ' + formatPrice(total) + '\n';
+        msg += 'Discount (' + session.discountCode + '): -' + formatPrice(savings) + '\n';
+    }
+
+    msg += '\n*Total: ' + formatPrice(finalTotal) + '*\n\n';
+    msg += 'Say "checkout" to place your order\n';
+    msg += 'Or "apply code [CODE]" for discount';
+
     return msg;
 }
 
@@ -167,13 +250,13 @@ function addToCart(input, session) {
     }
 
     if (!product) return 'Sorry, I could not find "' + input + '".';
-    if (!product.inStock) return 'Sorry, ' + product.name + ' is out of stock.';
+    if (!product.inStock) return 'Sorry, ' + product.name + ' is currently out of stock.';
 
     const existing = session.cart.find(item => item.id === product.id);
     if (existing) {
         existing.qty += qty;
     } else {
-        session.cart.push({ id: product.id, qty });
+        session.cart.push({ id: product.id, qty, discountedPrice: null });
     }
 
     return 'Added ' + qty + ' x ' + product.name + ' to your cart!\n\n' +
@@ -190,6 +273,24 @@ function removeFromCart(input, session) {
     return 'Removed ' + product.name + ' from cart.';
 }
 
+function applyDiscountCode(code, session) {
+    const upperCode = code.toUpperCase();
+
+    if (!DISCOUNT_CODES[upperCode]) {
+        let msg = 'Invalid discount code.\n\n';
+        msg += 'Available codes:\n';
+        Object.entries(DISCOUNT_CODES).forEach(([code, info]) => {
+            msg += code + ' - ' + info.description + '\n';
+        });
+        return msg;
+    }
+
+    session.discountCode = upperCode;
+    return 'Discount code ' + upperCode + ' applied!\n' +
+           DISCOUNT_CODES[upperCode].description + '\n\n' +
+           'Say "view cart" to see updated total.';
+}
+
 function doCheckout(session) {
     if (!session.cart || session.cart.length === 0) {
         return 'Your cart is empty.';
@@ -197,24 +298,116 @@ function doCheckout(session) {
 
     let total = 0;
     let orderDetails = '';
+
     session.cart.forEach(item => {
         const product = PRODUCTS.find(p => p.id === item.id);
-        const subtotal = product.price * item.qty;
+        const price = item.discountedPrice || product.price;
+        const subtotal = price * item.qty;
         total += subtotal;
         orderDetails += product.name + ' x ' + item.qty + ' = ' + formatPrice(subtotal) + '\n';
     });
 
+    // Apply discount code
+    let finalTotal = total;
+    let discountInfo = '';
+    if (session.discountCode && DISCOUNT_CODES[session.discountCode]) {
+        const discount = DISCOUNT_CODES[session.discountCode];
+        const savings = Math.round(total * discount.discount);
+        finalTotal = total - savings;
+        discountInfo = 'Discount (' + session.discountCode + '): -' + formatPrice(savings) + '\n';
+    }
+
     const orderId = 'ORD-' + Date.now().toString().slice(-6);
-    session.orderHistory.push({ id: orderId, items: [...session.cart], total, date: new Date() });
+    session.orderHistory.push({ 
+        id: orderId, 
+        items: [...session.cart], 
+        total: finalTotal, 
+        originalTotal: total,
+        discountCode: session.discountCode,
+        date: new Date() 
+    });
+
+    // Clear cart and discount
     session.cart = [];
+    session.discountCode = null;
 
     let msg = 'Order Placed Successfully!\n\n';
     msg += 'Order ID: ' + orderId + '\n';
-    msg += 'Total: ' + formatPrice(total) + '\n\n';
     msg += 'Items:\n' + orderDetails + '\n';
+    if (discountInfo) msg += discountInfo + '\n';
+    msg += 'Total: ' + formatPrice(finalTotal) + '\n\n';
     msg += 'Payment Options:\n' + PAYMENT_METHODS.join('\n') + '\n\n';
     msg += 'Send payment confirmation to +' + OWNER_NUMBER;
+
     return msg;
+}
+
+// BARGAINING FUNCTION
+function handleBargain(input, session) {
+    // Extract product and offered price
+    const bargainMatch = input.match(/(?:can i get|give me|sell me|how about|what about|i'll take)\s+(.+?)\s+(?:for|at)\s+(?:kes\s+)?(\d+)/i);
+
+    if (!bargainMatch) {
+        // Just asking about discount without specific price
+        const productMatch = input.match(/(?:discount on|bargain for|cheaper price for|reduce price of)\s+(.+)/i);
+        if (productMatch) {
+            const product = findProduct(productMatch[1]);
+            if (!product) return 'Sorry, I could not find that product.';
+            if (!product.allowDiscount) return 'Sorry, ' + product.name + ' is already at the best price. No discounts available.';
+            if (!product.inStock) return 'Sorry, ' + product.name + ' is out of stock.';
+
+            session.bargainingProduct = product.id;
+            return product.name + '\n\n' +
+                   'Original price: ' + formatPrice(product.price) + '\n' +
+                   'Lowest I can go: ' + formatPrice(product.minPrice) + '\n\n' +
+                   'What price did you have in mind?\n' +
+                   'Say something like "I will take it for ' + formatPrice(product.minPrice + 100) + '"';
+        }
+
+        return 'To bargain, say:\n' +
+               '"Can I get [product] for [price]?"\n' +
+               'Example: "Can I get earbuds for 1300?"';
+    }
+
+    const productName = bargainMatch[1];
+    const offeredPrice = parseInt(bargainMatch[2]);
+    const product = findProduct(productName);
+
+    if (!product) return 'Sorry, I could not find "' + productName + '".';
+    if (!product.allowDiscount) return 'Sorry, ' + product.name + ' is fixed at ' + formatPrice(product.price) + '. No discounts available.';
+    if (!product.inStock) return 'Sorry, ' + product.name + ' is out of stock.';
+
+    // Check if offered price is acceptable
+    if (offeredPrice >= product.minPrice) {
+        // Accept the offer
+        const existing = session.cart.find(item => item.id === product.id);
+        if (existing) {
+            existing.discountedPrice = offeredPrice;
+        } else {
+            session.cart.push({ id: product.id, qty: 1, discountedPrice: offeredPrice });
+        }
+
+        const savings = product.price - offeredPrice;
+        return 'Deal! ' + product.name + ' for ' + formatPrice(offeredPrice) + '\n' +
+               'You saved ' + formatPrice(savings) + '!\n\n' +
+               'Added to your cart. Say "view cart" to checkout.';
+    } else {
+        // Counter offer
+        const counterPrice = Math.round((product.price + offeredPrice) / 2);
+        session.bargainingProduct = product.id;
+
+        return 'Hmm, ' + formatPrice(offeredPrice) + ' is too low for ' + product.name + '.\n\n' +
+               'How about ' + formatPrice(counterPrice) + '?\n' +
+               'Say "yes" to accept or "how about [price]" to counter.';
+    }
+}
+
+function findProduct(nameOrId) {
+    const id = parseInt(nameOrId);
+    if (!isNaN(id)) {
+        return PRODUCTS.find(x => x.id === id);
+    }
+    return PRODUCTS.find(p => p.name.toLowerCase().includes(nameOrId.toLowerCase()));
 }
 
 function buildHours() {
@@ -251,32 +444,38 @@ function buildFAQ() {
            'A: 1-3 days in Nairobi\n\n' +
            'Q: Can I return items?\n' +
            'A: Yes, within 7 days with receipt\n\n' +
-           'Q: Do you offer warranties?\n' +
-           'A: Yes, 6 months on electronics\n\n' +
+           'Q: Do you offer discounts?\n' +
+           'A: Yes! Some products are negotiable. Ask "can I get a discount?"\n\n' +
            'Q: Minimum order amount?\n' +
            'A: No minimum!';
 }
 
 function buildHelp() {
     return 'How to Use This Shop:\n\n' +
-           'Just chat naturally! Examples:\n\n' +
            'Shopping:\n' +
-           '- "what do you sell"\n' +
-           '- "how much is power bank"\n' +
-           '- "I want to buy earbuds"\n' +
-           '- "add phone case to cart"\n' +
-           '- "view my cart"\n' +
-           '- "checkout"\n\n' +
+           '- "what do you sell" - Browse products\n' +
+           '- "send me pricelist" - Get price list\n' +
+           '- "how much is power bank" - Check price\n' +
+           '- "I want earbuds" - Add to cart\n' +
+           '- "view cart" - See your cart\n' +
+           '- "checkout" - Place order\n\n' +
+           'Bargaining & Discounts:\n' +
+           '- "can I get earbuds for 1300" - Bargain\n' +
+           '- "any discount on phone case" - Ask discount\n' +
+           '- "apply code BILLY10" - Use discount code\n\n' +
            'Info:\n' +
-           '- "business hours"\n' +
-           '- "do you deliver"\n' +
-           '- "payment options"\n\n' +
+           '- "business hours" - Opening times\n' +
+           '- "do you deliver" - Delivery info\n' +
+           '- "payment options" - How to pay\n\n' +
            'Support:\n' +
-           '- "faq"\n' +
-           '- "I need help" (human)';
+           '- "faq" - Common questions\n' +
+           '- "I need help" - Talk to human';
 }
 
+// ============================================
 // MESSAGE PROCESSOR
+// ============================================
+
 function processMessage(text, session) {
     text = text.trim().toLowerCase();
 
@@ -290,8 +489,13 @@ function processMessage(text, session) {
         return buildHelp();
     }
 
+    // Price list
+    if (/(pricelist|price list|send me prices|all prices|catalog|price catalog)/.test(text)) {
+        return buildPriceList();
+    }
+
     // Products
-    if (/(what do you sell|show me products|what products|catalog|list products|what do you have|what's available|show everything)/.test(text)) {
+    if (/(what do you sell|show me products|what products|list products|what do you have|what's available|show everything)/.test(text)) {
         return buildProducts();
     }
 
@@ -322,6 +526,26 @@ function processMessage(text, session) {
     const priceMatch = text.match(/(?:how much is|what's the price of|price of|cost of|how much for)\s+(.+)/);
     if (priceMatch) {
         return buildProductDetails(priceMatch[1].trim());
+    }
+
+    // Bargaining
+    if (/(bargain|discount|cheaper|reduce price|lower price|negotiate|best price|deal|offer)/.test(text)) {
+        return handleBargain(text, session);
+    }
+
+    // Accept bargain counter
+    if (/^(yes|okay|ok|deal|sure|fine|accepted)/.test(text) && session.bargainingProduct) {
+        const product = PRODUCTS.find(p => p.id === session.bargainingProduct);
+        session.bargainingProduct = null;
+        if (product) {
+            return 'Great! ' + product.name + ' has been added to your cart at the agreed price.\n\nSay "view cart" to checkout.';
+        }
+    }
+
+    // Apply discount code
+    const codeMatch = text.match(/(?:apply code|use code|code|promo|coupon)\s+([a-z0-9]+)/i);
+    if (codeMatch) {
+        return applyDiscountCode(codeMatch[1], session);
     }
 
     // Add to cart
@@ -419,13 +643,16 @@ function processMessage(text, session) {
     return 'I am not sure I understood that.\n\n' +
            'I can help you with:\n' +
            '- Shopping: "what do you sell"\n' +
-           '- Prices: "how much is [product]"\n' +
-           '- Delivery: "do you deliver"\n' +
+           '- Prices: "send me pricelist"\n' +
+           '- Bargain: "can I get discount on [product]"\n' +
            '- Help: "I need help"\n\n' +
            'Or type "help" to see all options.';
 }
 
+// ============================================
 // WHATSAPP CONNECTION
+// ============================================
+
 async function startBot() {
     console.log('Starting ' + SHOP_NAME + ' Bot...');
     connectionStatus = 'connecting';
@@ -486,7 +713,10 @@ async function startBot() {
     });
 }
 
+// ============================================
 // SIMPLE FRONTEND
+// ============================================
+
 app.get('/', async (req, res) => {
     let qrHtml = '';
 
