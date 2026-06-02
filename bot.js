@@ -77,6 +77,10 @@ let activeTrips = {};
 // Pending registrations
 let pendingRegistrations = {};
 
+// QR code storage for web display
+let qrCodeData = null;
+let qrGeneratedAt = null;
+
 // ============================================
 // HELPER FUNCTIONS
 // ============================================
@@ -182,7 +186,6 @@ function handleRegistration(from, text, sock) {
             reg.photoSent = true;
         }
 
-        // Complete registration
         const riderId = 'RID-' + String(riders.length + 1).padStart(3, '0');
         const newRider = {
             id: riderId,
@@ -204,7 +207,6 @@ function handleRegistration(from, text, sock) {
         riders.push(newRider);
         delete pendingRegistrations[phone];
 
-        // Notify admin
         const adminMsg = 'New Rider Registration!\n\nName: ' + reg.name + '\nPhone: ' + formatPhone(phone) + '\nID: ' + reg.idNumber + '\nBike: ' + reg.bikeNumber + '\nLocation: ' + reg.location + '\nPhoto: ' + (reg.photoSent ? 'Sent' : 'Skipped') + '\n\nReply "verify ' + riderId + '" to approve.';
         sock.sendMessage(ADMIN_NUMBER + '@s.whatsapp.net', { text: adminMsg });
 
@@ -336,10 +338,8 @@ function handleCustomerCommand(from, text, sock) {
     const phone = cleanPhone(from);
     const lower = text.toLowerCase().trim();
 
-    // Check for active trip
     const activeTrip = Object.values(activeTrips).find(t => t.customerPhone === phone && t.status !== 'completed' && t.status !== 'cancelled');
 
-    // Rating after trip
     if (/^[1-5]$/.test(text.trim()) && !activeTrip) {
         const completedTrip = Object.values(activeTrips).find(t => t.customerPhone === phone && t.status === 'completed' && !t.customerRated);
         if (completedTrip) {
@@ -356,7 +356,6 @@ function handleCustomerCommand(from, text, sock) {
         }
     }
 
-    // SOS / Emergency
     if (lower === 'sos' || lower === 'emergency' || lower === 'help emergency') {
         const sosMsg = 'EMERGENCY ALERT!\n\nCustomer: ' + formatPhone(phone) + '\nTime: ' + new Date().toLocaleString() + '\n\nIf you are in danger:\n1. Share your live location\n2. Call police: 999 or 112\n3. Call SafeRide Admin: ' + formatPhone(ADMIN_NUMBER) + '\n\nWe are tracking your trip and have alerted authorities.';
 
@@ -372,7 +371,6 @@ function handleCustomerCommand(from, text, sock) {
         return 'EMERGENCY ALERT SENT!\n\nAdmin has been notified.\n\nEmergency Numbers:\nPolice: 999 / 112\nSafeRide Admin: ' + formatPhone(ADMIN_NUMBER) + '\n\nStay safe. Help is on the way.';
     }
 
-    // Share trip
     if (lower === 'share trip' || lower === 'share') {
         if (!activeTrip) return 'No active trip to share.\nBook a ride first by typing your route.';
 
@@ -382,7 +380,6 @@ function handleCustomerCommand(from, text, sock) {
         return 'Share this message with your family/friends:\n\n' + shareMsg + '\n\nThey can track your trip in real-time.';
     }
 
-    // Cancel trip
     if (lower === 'cancel trip' || lower === 'cancel') {
         if (!activeTrip) return 'No active trip to cancel.';
 
@@ -398,7 +395,6 @@ function handleCustomerCommand(from, text, sock) {
         return 'Trip cancelled successfully.\nYou can book a new ride anytime.';
     }
 
-    // Trip status
     if (lower === 'trip status' || lower === 'status') {
         if (!activeTrip) return 'No active trip.\nBook a ride by typing: "I need a ride from [location] to [location]"';
 
@@ -412,7 +408,6 @@ function handleCustomerCommand(from, text, sock) {
         return statusMsg;
     }
 
-    // Rider info
     if (lower === 'rider info' || lower === 'my rider') {
         if (!activeTrip) return 'No active trip.\nBook a ride first.';
 
@@ -422,7 +417,6 @@ function handleCustomerCommand(from, text, sock) {
         return 'Your Rider:\nName: ' + rider.name + '\nRating: ' + rider.rating + '/5\nTrips Completed: ' + rider.tripsCompleted + '\nBike Number: ' + rider.bikeNumber + '\n\nIf you feel unsafe, reply "SOS" immediately.';
     }
 
-    // Price estimate
     if (lower.startsWith('price') || lower.startsWith('how much')) {
         const match = text.match(/from\s+(.+?)\s+to\s+(.+)/i);
         if (!match) {
@@ -442,17 +436,14 @@ function handleCustomerCommand(from, text, sock) {
         return 'Price Estimate\n\nFrom: ' + from + '\nTo: ' + to + '\nTime: ' + (isNight ? 'Night (8PM - 6AM)' : 'Day (6AM - 8PM)') + '\n\nPrice: ' + price + ' KES\n\nNight rides have a small +20% premium for rider safety.';
     }
 
-    // Locations list
     if (lower === 'locations' || lower === 'areas') {
         return 'We operate in these areas:\n\n' + LOCATIONS.map((l, i) => (i + 1) + '. ' + l).join('\n') + '\n\nType "price from [area] to [area]" for fare estimate.';
     }
 
-    // Night pricing info
     if (lower.includes('night') && lower.includes('price')) {
         return 'Fair Night Pricing\n\nWe charge only +20% at night to ensure:\n1. Rider safety compensation\n2. Fair prices for customers\n3. No exploitation\n\nExample:\nMeru Town to Makutano:\nDay: 100 KES\nNight: 120 KES (only +20 KES)\n\nThis is much fairer than riders charging double or triple at night!';
     }
 
-    // Help
     if (lower === 'help') {
         return '*Meru SafeRide - Help*\n\n*Book a Ride:*\n"I need a ride from [location] to [location]"\n\n*Check Price:*\n"Price from [location] to [location]"\n\n*Trip Status:*\n"trip status"\n\n*Safety:*\n"SOS" - Emergency alert\n"share trip" - Share with family\n"rider info" - Rider details\n\n*Other:*\n"locations" - Service areas\n"night pricing" - Fair night rates\n"cancel trip" - Cancel booking\n\nAvailable locations:\n' + LOCATIONS.slice(0, 5).join(', ') + '...';
     }
@@ -517,7 +508,6 @@ function bookRide(from, text, sock) {
 
     rider.status = 'busy';
 
-    // Notify rider
     const riderAlert = 'New Ride Request!\n\nTrip ID: ' + tripId + '\nFrom: ' + fromLoc + '\nTo: ' + toLoc + '\nPrice: ' + price + ' KES' + (isNight ? ' (Night Rate)' : '') + '\n\nReply "accept" or "decline" within 2 minutes.';
     sock.sendMessage(rider.phone + '@s.whatsapp.net', { text: riderAlert });
 
@@ -532,7 +522,6 @@ function processMessage(from, text, sock) {
     const phone = cleanPhone(from);
     const lower = text.toLowerCase().trim();
 
-    // Admin commands
     if (phone === ADMIN_NUMBER) {
         if (lower.startsWith('verify ')) {
             const riderId = text.split(' ')[1];
@@ -556,7 +545,6 @@ function processMessage(from, text, sock) {
         }
     }
 
-    // Registration flow
     if (lower === 'register' || lower === 'register rider' || lower === 'signup') {
         return handleRegistration(from, text, sock);
     }
@@ -565,23 +553,19 @@ function processMessage(from, text, sock) {
         return handleRegistration(from, text, sock);
     }
 
-    // Rider commands
     const rider = riders.find(r => r.phone === phone);
     if (rider) {
         const riderResponse = handleRiderCommand(from, text, sock);
         if (riderResponse) return riderResponse;
     }
 
-    // Customer commands
     const customerResponse = handleCustomerCommand(from, text, sock);
     if (customerResponse) return customerResponse;
 
-    // Book ride patterns
     if (lower.includes('ride') || lower.includes('need') || lower.includes('want') || lower.includes('book') || (LOCATIONS.some(l => lower.includes(l.toLowerCase())) && lower.includes('to'))) {
         return bookRide(from, text, sock);
     }
 
-    // Natural language
     if (['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'].some(w => lower.includes(w))) {
         return getTimeGreeting() + '! Welcome to Meru SafeRide!\n\nYour safe and affordable boda boda service.\n\nI can help you:\n1. Book a ride\n2. Check prices\n3. Find service areas\n\nJust type your route like:\n"I need a ride from Meru Town to Makutano"\n\nOr reply "help" for all options.';
     }
@@ -607,81 +591,206 @@ function processMessage(from, text, sock) {
 
 let sock = null;
 let botReady = false;
-let currentQR = null;
+let qrCodeData = null;
+let qrGeneratedAt = null;
+let connectionAttempts = 0;
 
 async function startBot() {
-    console.log('Starting SafeRide Bot...');
+    connectionAttempts++;
+    console.log('Starting SafeRide Bot... Attempt ' + connectionAttempts);
 
-    const { state, saveCreds } = await useMultiFileAuthState('auth_info');
-    const { version } = await fetchLatestBaileysVersion();
+    try {
+        const { state, saveCreds } = await useMultiFileAuthState('auth_info');
+        const { version } = await fetchLatestBaileysVersion();
 
-    const logger = pino({ level: 'silent' });
+        const logger = pino({ level: 'silent' });
 
-    sock = makeWASocket({
-        version,
-        auth: state,
-        logger,
-        browser: ['Ubuntu', 'Chrome', '20.0.04']
-    });
+        sock = makeWASocket({
+            version,
+            auth: state,
+            logger,
+            browser: ['Ubuntu', 'Chrome', '20.0.04'],
+            syncFullHistory: false,
+            markOnlineOnConnect: true
+        });
 
-    sock.ev.on('creds.update', saveCreds);
+        sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', ({ connection, qr }) => {
-        if (qr) {
-            currentQR = qr;
-            console.log('\nQR CODE - Visit /qr to scan\n');
-            qrcode.generate(qr, { small: true });
-        }
-        if (connection === 'close') {
-            botReady = false;
-            currentQR = null;
-            setTimeout(startBot, 5000);
-        }
-        if (connection === 'open') {
-            console.log('\nSafeRide Bot Connected!');
-            console.log('Number:', sock.user.id.split(':')[0]);
-            botReady = true;
-            currentQR = null;
-        }
-    });
+        sock.ev.on('connection.update', (update) => {
+            const { connection, qr, lastDisconnect } = update;
 
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.key.fromMe && m.type === 'notify') {
-            const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
-            const from = msg.key.remoteJid;
-
-            console.log('Message from', from, ':', text);
-
-            const reply = processMessage(from, text, sock);
-            if (reply) {
-                await sock.sendMessage(from, { text: reply });
+            if (qr) {
+                qrCodeData = qr;
+                qrGeneratedAt = Date.now();
+                console.log('\n=== QR CODE GENERATED ===');
+                console.log('Visit your site to scan the QR code');
+                console.log('QR expires in ~60 seconds - scan quickly!\n');
+                qrcode.generate(qr, { small: true });
             }
-        }
-    });
+
+            if (connection === 'close') {
+                botReady = false;
+                qrCodeData = null;
+                const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+                console.log('Connection closed. Reconnecting:', shouldReconnect);
+                if (shouldReconnect) {
+                    setTimeout(startBot, 5000);
+                }
+            }
+
+            if (connection === 'open') {
+                console.log('\n=== SAFE RIDE BOT CONNECTED ===');
+                console.log('Phone:', sock.user.id.split(':')[0]);
+                botReady = true;
+                qrCodeData = null;
+                qrGeneratedAt = null;
+                connectionAttempts = 0;
+            }
+        });
+
+        sock.ev.on('messages.upsert', async (m) => {
+            const msg = m.messages[0];
+            if (!msg.key.fromMe && m.type === 'notify') {
+                const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
+                const from = msg.key.remoteJid;
+
+                console.log('Message from', from, ':', text.substring(0, 50));
+
+                const reply = processMessage(from, text, sock);
+                if (reply) {
+                    await sock.sendMessage(from, { text: reply });
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error('Bot start error:', err);
+        setTimeout(startBot, 10000);
+    }
 }
 
 // ============================================
-// WEB SERVER
+// WEB SERVER WITH QR DISPLAY
 // ============================================
 
-app.get('/', (req, res) => {
-    const status = botReady ? 'online' : 'connecting';
-    const statusColor = botReady ? '#22c55e' : '#f59e0b';
+function getStatusHTML() {
+    const isOnline = botReady;
+    const hasQR = !!qrCodeData;
+    const qrAge = qrGeneratedAt ? Math.floor((Date.now() - qrGeneratedAt) / 1000) : 0;
+    const qrExpired = qrAge > 60;
 
-    let body = '';
-    if (currentQR) {
-        body = '<div style="text-align:center;padding:40px;"><h2>Scan QR Code with WhatsApp</h2><p>Open WhatsApp > Settings > Linked Devices > Link a Device</p><p style="color:#666;font-size:12px;margin-top:20px;">QR code generated. Refresh if needed.</p></div>';
-    } else if (botReady) {
-        body = '<div style="text-align:center;padding:40px;"><h1 style="color:#22c55e;">Online</h1><p>Meru SafeRide Bot is running</p><p>Number: +254114245222</p><p>Riders: ' + riders.length + ' | Active Trips: ' + Object.keys(activeTrips).length + '</p></div>';
+    let statusBadge, statusText, bodyContent;
+
+    if (isOnline) {
+        statusBadge = '#22c55e';
+        statusText = 'ONLINE';
+        bodyContent = '<div style="text-align:center;padding:30px;">' +
+            '<div style="font-size:64px;margin-bottom:10px;">&#128663;</div>' +
+            '<h2 style="color:#22c55e;margin:5px 0;">Bot Connected!</h2>' +
+            '<p style="color:#666;font-size:16px;">Meru SafeRide is active</p>' +
+            '<div style="background:#f0fdf4;border:1px solid #22c55e;border-radius:10px;padding:15px;margin:20px 0;text-align:left;">' +
+            '<p><strong>Number:</strong> +254114245222</p>' +
+            '<p><strong>Riders:</strong> ' + riders.length + '</p>' +
+            '<p><strong>Active Trips:</strong> ' + Object.keys(activeTrips).length + '</p>' +
+            '</div>' +
+            '<p style="color:#888;font-size:13px;">The bot is receiving messages on WhatsApp</p>' +
+            '</div>';
+    } else if (hasQR && !qrExpired) {
+        statusBadge = '#f59e0b';
+        statusText = 'SCAN QR CODE';
+        bodyContent = '<div style="text-align:center;padding:20px;">' +
+            '<h2 style="color:#f59e0b;margin-bottom:5px;">&#128241; Scan to Connect</h2>' +
+            '<p style="color:#666;font-size:14px;margin-bottom:15px;">Open WhatsApp > Settings > Linked Devices > Link a Device</p>' +
+            '<div style="background:#fff;border:3px solid #f59e0b;border-radius:15px;padding:20px;display:inline-block;margin:10px auto;">' +
+            '<div style="font-family:monospace;font-size:10px;line-height:10px;white-space:pre;letter-spacing:1px;">' + 
+            qrcode.generate(qrCodeData, { small: true }) + '</div>' +
+            '</div>' +
+            '<p style="color:#dc2626;font-size:14px;font-weight:bold;margin-top:10px;">&#9200; QR expires in ' + (60 - qrAge) + ' seconds!</p>' +
+            '<p style="color:#888;font-size:12px;margin-top:15px;">If QR expired, <a href="/restart" style="color:#667eea;">click here to refresh</a></p>' +
+            '</div>';
+    } else if (hasQR && qrExpired) {
+        statusBadge = '#dc2626';
+        statusText = 'QR EXPIRED';
+        bodyContent = '<div style="text-align:center;padding:40px;">' +
+            '<div style="font-size:48px;margin-bottom:10px;">&#9200;</div>' +
+            '<h2 style="color:#dc2626;">QR Code Expired</h2>' +
+            '<p style="color:#666;">The QR code has expired. Please restart the bot to get a new one.</p>' +
+            '<a href="/restart" style="display:inline-block;background:#dc2626;color:#fff;padding:12px 30px;border-radius:25px;text-decoration:none;font-weight:bold;margin-top:20px;">Restart Bot</a>' +
+            '</div>';
     } else {
-        body = '<div style="text-align:center;padding:40px;"><h2>Connecting...</h2><p>Please wait while the bot initializes.</p></div>';
+        statusBadge = '#f59e0b';
+        statusText = 'CONNECTING...';
+        bodyContent = '<div style="text-align:center;padding:40px;">' +
+            '<div style="font-size:48px;margin-bottom:10px;animation:spin 2s linear infinite;">&#128260;</div>' +
+            '<h2 style="color:#f59e0b;">Connecting to WhatsApp...</h2>' +
+            '<p style="color:#666;">Please wait while we initialize the connection.</p>' +
+            '<p style="color:#888;font-size:13px;margin-top:20px;">If this takes too long, <a href="/restart" style="color:#667eea;">restart the bot</a></p>' +
+            '</div>';
     }
 
-    res.send('<!DOCTYPE html><html><head><title>Meru SafeRide</title><style>body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;}.card{background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-width:500px;width:90%;overflow:hidden;}.header{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:30px;text-align:center;}.header h1{margin:0;font-size:28px;}.status-badge{display:inline-block;padding:8px 20px;border-radius:50px;font-size:14px;font-weight:bold;margin-top:10px;background:' + statusColor + ';color:#fff;}.body{padding:30px;}</style></head><body><div class="card"><div class="header"><h1>Meru SafeRide</h1><span class="status-badge">' + status.toUpperCase() + '</span></div><div class="body">' + body + '</div></div></body></html>');
+    return '<!DOCTYPE html>' +
+        '<html><head><title>Meru SafeRide</title>' +
+        '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<style>' +
+        '*{margin:0;padding:0;box-sizing:border-box;}' +
+        'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}' +
+        '.card{background:#fff;border-radius:20px;box-shadow:0 25px 80px rgba(0,0,0,0.3);max-width:480px;width:100%;overflow:hidden;}' +
+        '.header{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:30px;text-align:center;}' +
+        '.header h1{margin:0;font-size:26px;letter-spacing:0.5px;}' +
+        '.header p{margin:8px 0 0;font-size:14px;opacity:0.9;}' +
+        '.status-badge{display:inline-block;padding:8px 24px;border-radius:50px;font-size:13px;font-weight:bold;margin-top:12px;background:' + statusBadge + ';color:#fff;box-shadow:0 4px 15px rgba(0,0,0,0.2);}' +
+        '.body{padding:0;}' +
+        '@keyframes spin{0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}' +
+        '.footer{background:#f8f9fa;padding:15px;text-align:center;font-size:12px;color:#888;border-top:1px solid #e5e7eb;}' +
+        '</style></head><body>' +
+        '<div class="card"><div class="header"><h1>&#127757; Meru SafeRide</h1><p>Safe Boda Boda Service</p><span class="status-badge">' + statusText + '</span></div>' +
+        '<div class="body">' + bodyContent + '</div>' +
+        '<div class="footer">Meru SafeRide Bot | +254114245222 | <a href="/health" style="color:#667eea;">Health Check</a></div>' +
+        '</div></body></html>';
+}
+
+app.get('/', (req, res) => {
+    res.send(getStatusHTML());
 });
 
-app.get('/health', (req, res) => res.json({ status: 'ok', botReady }));
+app.get('/qr', (req, res) => {
+    if (!qrCodeData) {
+        return res.send('<html><body style="padding:40px;text-align:center;font-family:Arial;"><h2>No QR Code Available</h2><p>The bot may already be connected or still initializing.</p><p><a href="/">Go to home page</a></p></body></html>');
+    }
+
+    const qrAscii = qrcode.generate(qrCodeData, { small: true });
+    res.send('<html><head><title>QR Code - Meru SafeRide</title><meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
+        '<body style="font-family:monospace;padding:20px;background:#000;color:#0f0;text-align:center;">' +
+        '<h2 style="color:#fff;margin-bottom:10px;">&#128241; Scan with WhatsApp</h2>' +
+        '<pre style="font-size:8px;line-height:8px;display:inline-block;background:#fff;padding:15px;border-radius:10px;color:#000;">' + qrAscii + '</pre>' +
+        '<p style="color:#fff;margin-top:15px;font-size:14px;font-family:Arial;">1. Open WhatsApp<br>2. Settings > Linked Devices<br>3. Link a Device<br>4. Point camera at this code</p>' +
+        '<p style="color:#ff0;font-family:Arial;font-size:13px;margin-top:10px;">&#9200; QR expires in 60 seconds!</p>' +
+        '<p style="margin-top:20px;"><a href="/" style="color:#667eea;font-family:Arial;">Back to Home</a></p>' +
+        '</body></html>');
+});
+
+app.get('/restart', (req, res) => {
+    qrCodeData = null;
+    qrGeneratedAt = null;
+    botReady = false;
+    if (sock) {
+        try { sock.end(); } catch(e) {}
+    }
+    setTimeout(startBot, 2000);
+    res.send('<html><body style="padding:40px;text-align:center;font-family:Arial;"><h2>Restarting Bot...</h2><p>Please wait 10 seconds and refresh the page.</p><p><a href="/">Go to home page</a></p><script>setTimeout(function(){window.location="/";},10000);</script></body></html>');
+});
+
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'ok', 
+        botReady, 
+        hasQR: !!qrCodeData,
+        qrAge: qrGeneratedAt ? Math.floor((Date.now() - qrGeneratedAt) / 1000) : null,
+        riders: riders.length,
+        activeTrips: Object.keys(activeTrips).length,
+        timestamp: new Date().toISOString()
+    });
+});
 
 app.get('/trip/:id', (req, res) => {
     const trip = activeTrips[req.params.id];
@@ -692,6 +801,7 @@ app.get('/trip/:id', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log('Server on port ' + PORT);
+    console.log('Server running on port ' + PORT);
+    console.log('Visit: https://whatsapp-bot-1-p25f.onrender.com');
     startBot();
 });
