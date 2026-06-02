@@ -1,5 +1,5 @@
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
-const QRCode = require('qrcode');
+const qrcode = require('qrcode-terminal');
 const express = require('express');
 const pino = require('pino');
 
@@ -7,571 +7,610 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ============================================
-// BODA BODA BOT CONFIGURATION
+// BODA BODA BOT - MERU SAFERIDE
 // ============================================
 
-const APP_NAME = 'Meru Boda Boda SafeRide';
+const OWNER_NUMBER = '254114245222';
 const ADMIN_NUMBER = '254114245222';
-const EMERGENCY_NUMBER = '999'; // Police
+const BOT_NAME = 'Meru SafeRide';
 
-// Locations in Meru
-const LOCATIONS = {
-    'meru town': { name: 'Meru Town', lat: 0.0500, lng: 37.6500 },
-    'makutano': { name: 'Makutano', lat: 0.0600, lng: 37.6400 },
-    'kaaga': { name: 'Kaaga', lat: 0.0700, lng: 37.6600 },
-    'kathwana': { name: 'Kathwana', lat: 0.0800, lng: 37.6300 },
-    'timau': { name: 'Timau', lat: 0.0900, lng: 37.6700 },
-    'maua': { name: 'Maua', lat: 0.1000, lng: 37.6800 },
-    'nkuene': { name: 'Nkuene', lat: 0.0400, lng: 37.6200 },
-    'giaki': { name: 'Giaki', lat: 0.0300, lng: 37.6100 }
-};
-
-// Base prices between locations (KES, daytime)
-const ROUTE_PRICES = {
-    'meru town-makutano': 100,
-    'meru town-kaaga': 150,
-    'meru town-kathwana': 120,
-    'meru town-timau': 200,
-    'meru town-maua': 250,
-    'meru town-nkuene': 80,
-    'meru town-giaki': 90,
-    'makutano-kaaga': 80,
-    'makutano-kathwana': 70,
-    'makutano-timau': 180,
-    'makutano-maua': 220,
-    'kaaga-kathwana': 60,
-    'kaaga-timau': 150,
-    'kaaga-maua': 200,
-    'kathwana-timau': 140,
-    'kathwana-maua': 180,
-    'timau-maua': 100
-};
-
-const NIGHT_START = 20; // 8 PM
-const NIGHT_END = 6;    // 6 AM
-const NIGHT_MULTIPLIER = 1.2; // 20% premium (fair, not exploitative)
-
-// ============================================
-// DATABASE (In-memory, replace with real DB for production)
-// ============================================
-
-const riders = {};
-const customers = {};
-const activeTrips = {};
-const tripHistory = [];
-
-// Demo riders (in production, riders register via admin)
-const demoRiders = [
-    { id: 'R001', name: 'John Mwenda', phone: '254712345001', location: 'meru town', status: 'available', rating: 4.5, trips: 120, verified: true },
-    { id: 'R002', name: 'Peter Kariuki', phone: '254712345002', location: 'makutano', status: 'available', rating: 4.8, trips: 200, verified: true },
-    { id: 'R003', name: 'James Mutua', phone: '254712345003', location: 'kaaga', status: 'available', rating: 4.2, trips: 80, verified: true },
-    { id: 'R004', name: 'Daniel Ochieng', phone: '254712345004', location: 'meru town', status: 'busy', rating: 4.6, trips: 150, verified: true },
-    { id: 'R005', name: 'Michael Kimani', phone: '254712345005', location: 'kathwana', status: 'available', rating: 4.9, trips: 300, verified: true }
+// Locations
+const LOCATIONS = [
+    'Meru Town', 'Makutano', 'Kaaga', 'Kathwana', 'Timau',
+    'Maua', 'Nkuene', 'Giaki', 'Kianjai', 'Nkubu', 'Mitunguu'
 ];
 
-demoRiders.forEach(r => riders[r.id] = r);
+// Pricing (KES)
+const BASE_PRICES = {
+    'Meru Town-Makutano': { day: 100, night: 120 },
+    'Meru Town-Kaaga': { day: 150, night: 180 },
+    'Meru Town-Kathwana': { day: 200, night: 240 },
+    'Meru Town-Timau': { day: 250, night: 300 },
+    'Meru Town-Maua': { day: 300, night: 360 },
+    'Makutano-Kaaga': { day: 80, night: 96 },
+    'Makutano-Kathwana': { day: 120, night: 144 },
+    'Kaaga-Timau': { day: 180, night: 216 },
+    'Kathwana-Maua': { day: 150, night: 180 },
+    'Nkuene-Giaki': { day: 60, night: 72 },
+    'Kianjai-Nkubu': { day: 100, night: 120 },
+    'Mitunguu-Meru Town': { day: 120, night: 144 }
+};
 
-// ============================================
-// STATE
-// ============================================
+const WITHIN_AREA_PRICE = { day: 50, night: 60 };
+const LONG_DISTANCE_BASE = { day: 200, night: 240 };
 
-let currentQR = null;
-let sock = null;
-let botReady = false;
-let connectionStatus = 'initializing';
-
-function getSession(jid) {
-    if (!customers[jid]) {
-        customers[jid] = {
-            phone: jid.split('@')[0],
-            name: null,
-            currentTrip: null,
-            tripCount: 0,
-            rating: 5.0,
-            emergencyContact: null
-        };
+// Demo riders
+let riders = [
+    {
+        id: 'RID-001',
+        name: 'Peter Kariuki',
+        phone: '254101646251',
+        idNumber: '12345678',
+        bikeNumber: 'KME 123A',
+        location: 'Meru Town',
+        status: 'available',
+        rating: 4.8,
+        tripsCompleted: 200,
+        registered: true,
+        verified: true,
+        registrationStep: 'complete'
+    },
+    {
+        id: 'RID-002',
+        name: 'John Mutua',
+        phone: '254717059203',
+        idNumber: '87654321',
+        bikeNumber: 'KME 456B',
+        location: 'Makutano',
+        status: 'available',
+        rating: 4.5,
+        tripsCompleted: 150,
+        registered: true,
+        verified: true,
+        registrationStep: 'complete'
     }
-    return customers[jid];
-}
+];
+
+// Active trips
+let activeTrips = {};
+
+// Pending registrations
+let pendingRegistrations = {};
 
 // ============================================
-// PRICING ENGINE
+// HELPER FUNCTIONS
 // ============================================
 
 function isNightTime() {
     const hour = new Date().getHours();
-    return hour >= NIGHT_START || hour < NIGHT_END;
+    return hour >= 20 || hour < 6;
 }
 
-function getPrice(pickup, dropoff) {
-    const key1 = pickup + '-' + dropoff;
-    const key2 = dropoff + '-' + pickup;
+function getPrice(from, to) {
+    const key1 = from + '-' + to;
+    const key2 = to + '-' + from;
+    const isNight = isNightTime();
 
-    let basePrice = ROUTE_PRICES[key1] || ROUTE_PRICES[key2];
-
-    // If route not in database, estimate
-    if (!basePrice) {
-        basePrice = 100; // Default
+    if (BASE_PRICES[key1]) {
+        return BASE_PRICES[key1][isNight ? 'night' : 'day'];
     }
-
-    const night = isNightTime();
-    const finalPrice = night ? Math.round(basePrice * NIGHT_MULTIPLIER) : basePrice;
-
-    return {
-        basePrice,
-        finalPrice,
-        night,
-        premium: night ? Math.round(basePrice * (NIGHT_MULTIPLIER - 1)) : 0
-    };
-}
-
-// ============================================
-// RIDER MATCHING
-// ============================================
-
-function findNearestRider(location) {
-    const available = Object.values(riders).filter(r => 
-        r.status === 'available' && r.verified
-    );
-
-    if (available.length === 0) return null;
-
-    // Simple matching: same location first, then any available
-    const sameLocation = available.filter(r => r.location === location);
-    if (sameLocation.length > 0) {
-        return sameLocation[0]; // Return first available in same area
+    if (BASE_PRICES[key2]) {
+        return BASE_PRICES[key2][isNight ? 'night' : 'day'];
     }
-
-    return available[0]; // Return any available rider
+    if (from === to) {
+        return WITHIN_AREA_PRICE[isNight ? 'night' : 'day'];
+    }
+    return LONG_DISTANCE_BASE[isNight ? 'night' : 'day'];
 }
 
-// ============================================
-// RESPONSE BUILDERS
-// ============================================
+function findRider(location) {
+    return riders.find(r => r.location === location && r.status === 'available' && r.registered && r.verified);
+}
 
-function buildWelcome() {
+function generateTripId() {
+    return 'TRP-' + Math.floor(10000000 + Math.random() * 90000000);
+}
+
+function cleanPhone(phone) {
+    let p = phone.replace(/\D/g, '');
+    if (p.startsWith('0')) p = '254' + p.substring(1);
+    if (!p.startsWith('254')) p = '254' + p;
+    return p;
+}
+
+function formatPhone(phone) {
+    let p = phone.replace(/\D/g, '');
+    if (p.startsWith('254')) return '0' + p.substring(3);
+    return p;
+}
+
+function getTimeGreeting() {
     const hour = new Date().getHours();
-    let greeting = 'Good morning';
-    if (hour >= 12) greeting = 'Good afternoon';
-    if (hour >= 17) greeting = 'Good evening';
-
-    let msg = greeting + '! Welcome to *' + APP_NAME + '* \n\n';
-    msg += 'Your safe and fair boda boda service in Meru.\n\n';
-    msg += 'What I can do:\n';
-    msg += '- Book a ride (say: "I need a ride from [place] to [place]")\n';
-    msg += '- Check prices (say: "price from [place] to [place]")\n';
-    msg += '- See locations (say: "locations")\n';
-    msg += '- Emergency (say: "SOS" or "emergency")\n';
-    msg += '- Share trip with family\n\n';
-
-    if (isNightTime()) {
-        msg += '*Night mode active* - Fair 20% premium applied\n';
-        msg += 'No overcharging, guaranteed!\n\n';
-    }
-
-    msg += 'Where do you want to go today?';
-    return msg;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
 }
 
-function buildLocations() {
-    let msg = '*Available Locations*\n\n';
-    Object.entries(LOCATIONS).forEach(([key, loc]) => {
-        msg += '- ' + loc.name + '\n';
-    });
-    msg += '\nSay: "I need a ride from [location] to [location]"\n';
-    msg += 'Example: "I need a ride from Meru Town to Makutano"';
-    return msg;
+// ============================================
+// REGISTRATION FLOW
+// ============================================
+
+function handleRegistration(from, text, sock) {
+    const phone = cleanPhone(from);
+    const reg = pendingRegistrations[phone];
+
+    if (!reg) {
+        pendingRegistrations[phone] = { step: 'start', phone: phone };
+        return 'Welcome to SafeRide Rider Registration!\n\nTo register as a rider, I need some details:\n\nStep 1/5: What is your FULL NAME?\n(Example: Peter Kariuki)';
+    }
+
+    if (reg.step === 'start') {
+        reg.name = text.trim();
+        reg.step = 'id';
+        return 'Step 2/5: What is your NATIONAL ID NUMBER?\n(Example: 12345678)';
+    }
+
+    if (reg.step === 'id') {
+        if (!/^\d{7,8}$/.test(text.trim())) {
+            return 'Invalid ID number. Please enter a valid 7-8 digit ID number.';
+        }
+        reg.idNumber = text.trim();
+        reg.step = 'bike';
+        return 'Step 3/5: What is your MOTORBIKE NUMBER PLATE?\n(Example: KME 123A)';
+    }
+
+    if (reg.step === 'bike') {
+        reg.bikeNumber = text.trim().toUpperCase();
+        reg.step = 'location';
+        return 'Step 4/5: Which area do you operate in?\n\n' + LOCATIONS.join(', ') + '\n\nReply with your area.';
+    }
+
+    if (reg.step === 'location') {
+        const loc = text.trim();
+        if (!LOCATIONS.includes(loc)) {
+            return 'Invalid area. Please choose from:\n' + LOCATIONS.join(', ');
+        }
+        reg.location = loc;
+        reg.step = 'photo';
+        return 'Step 5/5: Please send a CLEAR PHOTO of your motorbike showing the NUMBER PLATE.\n\nReply "done" when you have sent the photo, or type "skip" to continue without photo (admin will verify later).';
+    }
+
+    if (reg.step === 'photo') {
+        if (text.toLowerCase() === 'skip') {
+            reg.photoSent = false;
+        } else {
+            reg.photoSent = true;
+        }
+
+        // Complete registration
+        const riderId = 'RID-' + String(riders.length + 1).padStart(3, '0');
+        const newRider = {
+            id: riderId,
+            name: reg.name,
+            phone: phone,
+            idNumber: reg.idNumber,
+            bikeNumber: reg.bikeNumber,
+            location: reg.location,
+            status: 'offline',
+            rating: 0,
+            tripsCompleted: 0,
+            registered: true,
+            verified: false,
+            registrationStep: 'complete',
+            photoSent: reg.photoSent,
+            registeredAt: new Date().toISOString()
+        };
+
+        riders.push(newRider);
+        delete pendingRegistrations[phone];
+
+        // Notify admin
+        const adminMsg = 'New Rider Registration!\n\nName: ' + reg.name + '\nPhone: ' + formatPhone(phone) + '\nID: ' + reg.idNumber + '\nBike: ' + reg.bikeNumber + '\nLocation: ' + reg.location + '\nPhoto: ' + (reg.photoSent ? 'Sent' : 'Skipped') + '\n\nReply "verify ' + riderId + '" to approve.';
+        sock.sendMessage(ADMIN_NUMBER + '@s.whatsapp.net', { text: adminMsg });
+
+        return 'Registration Complete!\n\nYour Details:\nName: ' + reg.name + '\nRider ID: ' + riderId + '\nBike: ' + reg.bikeNumber + '\nLocation: ' + reg.location + '\n\nStatus: PENDING VERIFICATION\nAn admin will verify your details within 24 hours.\n\nOnce verified, you will receive ride requests automatically.\n\nTo go online and start receiving trips, reply "go online".';
+    }
+
+    return 'Registration error. Please start over by typing "register".';
 }
 
-function buildPriceEstimate(pickup, dropoff) {
-    const pickupKey = Object.keys(LOCATIONS).find(k => k.includes(pickup.toLowerCase()) || LOCATIONS[k].name.toLowerCase().includes(pickup.toLowerCase()));
-    const dropoffKey = Object.keys(LOCATIONS).find(k => k.includes(dropoff.toLowerCase()) || LOCATIONS[k].name.toLowerCase().includes(dropoff.toLowerCase()));
+// ============================================
+// RIDER COMMANDS
+// ============================================
 
-    if (!pickupKey || !dropoffKey) {
-        return 'Sorry, I do not recognize one of those locations.\n\n' +
-               'Available locations:\n' +
-               Object.values(LOCATIONS).map(l => '- ' + l.name).join('\n') + '\n\n' +
-               'Say: "price from [location] to [location]"';
-    }
-
-    if (pickupKey === dropoffKey) {
-        return 'Pickup and dropoff cannot be the same place!';
-    }
-
-    const pricing = getPrice(pickupKey, dropoffKey);
-
-    let msg = '*Price Estimate*\n\n';
-    msg += 'From: ' + LOCATIONS[pickupKey].name + '\n';
-    msg += 'To: ' + LOCATIONS[dropoffKey].name + '\n\n';
-    msg += 'Base price: ' + pricing.basePrice + ' KES\n';
-
-    if (pricing.night) {
-        msg += 'Night premium (20%): +' + pricing.premium + ' KES\n';
-        msg += '*Total: ' + pricing.finalPrice + ' KES*\n\n';
-        msg += 'Fair night pricing - no overcharging!';
-    } else {
-        msg += '*Total: ' + pricing.finalPrice + ' KES*\n\n';
-        msg += 'Daytime rate';
-    }
-
-    msg += '\n\nTo book, say: "book from ' + LOCATIONS[pickupKey].name + ' to ' + LOCATIONS[dropoffKey].name + '"';
-    return msg;
-}
-
-function bookRide(customerJid, pickup, dropoff, session) {
-    const pickupKey = Object.keys(LOCATIONS).find(k => k.includes(pickup.toLowerCase()) || LOCATIONS[k].name.toLowerCase().includes(pickup.toLowerCase()));
-    const dropoffKey = Object.keys(LOCATIONS).find(k => k.includes(dropoff.toLowerCase()) || LOCATIONS[k].name.toLowerCase().includes(dropoff.toLowerCase()));
-
-    if (!pickupKey || !dropoffKey) {
-        return 'Sorry, I do not recognize one of those locations. Say "locations" to see available areas.';
-    }
-
-    if (pickupKey === dropoffKey) {
-        return 'Pickup and dropoff cannot be the same place!';
-    }
-
-    // Check if customer already has active trip
-    if (session.currentTrip) {
-        return 'You already have an active trip!\n\n' +
-               'Trip ID: ' + session.currentTrip + '\n' +
-               'Say "trip status" to check or "cancel trip" to cancel.';
-    }
-
-    const pricing = getPrice(pickupKey, dropoffKey);
-    const rider = findNearestRider(pickupKey);
+function handleRiderCommand(from, text, sock) {
+    const phone = cleanPhone(from);
+    const rider = riders.find(r => r.phone === phone);
 
     if (!rider) {
-        return 'Sorry, no riders are available right now in ' + LOCATIONS[pickupKey].name + '.\n\n' +
-               'Please try again in a few minutes or try a different pickup location.';
+        return 'You are not registered as a rider. Reply "register" to sign up.';
     }
 
-    // Create trip
-    const tripId = 'TRP-' + Date.now().toString().slice(-8);
-    const trip = {
-        id: tripId,
-        customerJid: customerJid,
-        customerPhone: session.phone,
-        riderId: rider.id,
-        riderPhone: rider.phone,
-        pickup: pickupKey,
-        dropoff: dropoffKey,
-        price: pricing.finalPrice,
-        basePrice: pricing.basePrice,
-        nightPremium: pricing.premium,
-        status: 'finding_rider',
-        createdAt: new Date(),
-        acceptedAt: null,
-        startedAt: null,
-        completedAt: null
-    };
+    const cmd = text.toLowerCase().trim();
 
-    activeTrips[tripId] = trip;
-    session.currentTrip = tripId;
-
-    // Mark rider as busy
-    rider.status = 'busy';
-
-    // Send alert to rider (in production, this would message rider's WhatsApp)
-    console.log('RIDER ALERT to ' + rider.phone + ': New ride ' + tripId + ' from ' + LOCATIONS[pickupKey].name + ' to ' + LOCATIONS[dropoffKey].name + ' for ' + pricing.finalPrice + ' KES');
-
-    let msg = '*Booking Requested!*\n\n';
-    msg += 'Trip ID: ' + tripId + '\n';
-    msg += 'From: ' + LOCATIONS[pickupKey].name + '\n';
-    msg += 'To: ' + LOCATIONS[dropoffKey].name + '\n';
-    msg += 'Price: ' + pricing.finalPrice + ' KES\n';
-    if (pricing.night) {
-        msg += '(Includes fair night premium)\n';
+    if (cmd === 'go online' || cmd === 'online') {
+        if (!rider.verified) {
+            return 'Your account is pending verification. Please wait for admin approval.';
+        }
+        rider.status = 'available';
+        return 'You are now ONLINE!\n\nYou will receive ride requests for ' + rider.location + '.\n\nReply "go offline" to stop receiving requests.';
     }
-    msg += '\n';
-    msg += 'Finding nearest rider...\n\n';
-    msg += 'Rider: ' + rider.name + '\n';
-    msg += 'Rating: ' + rider.rating + '/5\n';
-    msg += 'Trips completed: ' + rider.trips + '\n\n';
-    msg += 'Waiting for rider to accept...\n';
-    msg += 'You will receive confirmation shortly.';
 
-    return msg;
+    if (cmd === 'go offline' || cmd === 'offline') {
+        rider.status = 'offline';
+        return 'You are now OFFLINE.\n\nYou will not receive ride requests.\nReply "go online" to start receiving trips again.';
+    }
+
+    if (cmd === 'my status') {
+        return 'Your Status:\nName: ' + rider.name + '\nID: ' + rider.id + '\nStatus: ' + rider.status.toUpperCase() + '\nRating: ' + (rider.rating || 'N/A') + '/5\nTrips: ' + rider.tripsCompleted + '\nVerified: ' + (rider.verified ? 'Yes' : 'Pending');
+    }
+
+    if (cmd === 'accept') {
+        const trip = Object.values(activeTrips).find(t => t.riderPhone === phone && t.status === 'pending');
+        if (!trip) return 'No pending trip requests.';
+
+        trip.status = 'accepted';
+        trip.riderAcceptedAt = new Date().toISOString();
+
+        const customerMsg = 'Trip Accepted!\n\nRider: ' + rider.name + '\nRating: ' + rider.rating + '/5\nTrips: ' + rider.tripsCompleted + '\nBike: ' + rider.bikeNumber + '\n\nPrice: ' + trip.price + ' KES\n\nRider is on the way! ETA: 3-5 minutes.\n\nTrip ID: ' + trip.id;
+        sock.sendMessage(trip.customerPhone + '@s.whatsapp.net', { text: customerMsg });
+
+        return 'Trip Accepted!\n\nCustomer: ' + trip.customerName + '\nFrom: ' + trip.from + '\nTo: ' + trip.to + '\nPrice: ' + trip.price + ' KES\n\nGo pick up the customer now.\nReply "arrived" when you reach the pickup point.';
+    }
+
+    if (cmd === 'decline') {
+        const trip = Object.values(activeTrips).find(t => t.riderPhone === phone && t.status === 'pending');
+        if (!trip) return 'No pending trip requests.';
+
+        trip.status = 'declined';
+        rider.status = 'available';
+
+        const altRider = findRider(trip.from);
+        if (altRider) {
+            trip.riderId = altRider.id;
+            trip.riderPhone = altRider.phone;
+            trip.status = 'pending';
+
+            const riderAlert = 'New Ride Request!\n\nFrom: ' + trip.from + '\nTo: ' + trip.to + '\nPrice: ' + trip.price + ' KES\nCustomer: ' + trip.customerName + '\n\nReply "accept" or "decline".';
+            sock.sendMessage(altRider.phone + '@s.whatsapp.net', { text: riderAlert });
+
+            return 'Trip declined. Another rider has been notified.';
+        }
+
+        const customerMsg = 'Sorry, no riders available right now.\nPlease try again in a few minutes or call our hotline.';
+        sock.sendMessage(trip.customerPhone + '@s.whatsapp.net', { text: customerMsg });
+
+        delete activeTrips[trip.id];
+        return 'Trip declined. Customer has been notified.';
+    }
+
+    if (cmd === 'arrived') {
+        const trip = Object.values(activeTrips).find(t => t.riderPhone === phone && t.status === 'accepted');
+        if (!trip) return 'No active trip found.';
+
+        trip.status = 'arrived';
+
+        const customerMsg = 'Your rider has ARRIVED!\n\nRider: ' + rider.name + '\nBike: ' + rider.bikeNumber + '\n\nPlease meet your rider at the pickup point.\nPrice: ' + trip.price + ' KES';
+        sock.sendMessage(trip.customerPhone + '@s.whatsapp.net', { text: customerMsg });
+
+        return 'Customer notified. Start the trip now.\nReply "complete" when the trip is finished.';
+    }
+
+    if (cmd === 'complete') {
+        const trip = Object.values(activeTrips).find(t => t.riderPhone === phone && (t.status === 'arrived' || t.status === 'in-progress'));
+        if (!trip) return 'No active trip found.';
+
+        trip.status = 'completed';
+        trip.completedAt = new Date().toISOString();
+        rider.tripsCompleted += 1;
+        rider.status = 'available';
+
+        const customerMsg = 'Trip Completed!\n\nFrom: ' + trip.from + '\nTo: ' + trip.to + '\nPrice: ' + trip.price + ' KES\n\nPlease pay the rider now.\n\nRate your ride (1-5):\nReply with a number 1-5.';
+        sock.sendMessage(trip.customerPhone + '@s.whatsapp.net', { text: customerMsg });
+
+        return 'Trip completed!\nPrice: ' + trip.price + ' KES\nCollect payment from customer.';
+    }
+
+    if (cmd === 'cancel trip') {
+        const trip = Object.values(activeTrips).find(t => t.riderPhone === phone && t.status !== 'completed');
+        if (!trip) return 'No active trip to cancel.';
+
+        trip.status = 'cancelled';
+        rider.status = 'available';
+
+        const customerMsg = 'Your trip has been cancelled by the rider.\nWe apologize for the inconvenience.\nPlease request a new ride.';
+        sock.sendMessage(trip.customerPhone + '@s.whatsapp.net', { text: customerMsg });
+
+        delete activeTrips[trip.id];
+        return 'Trip cancelled. Customer has been notified.';
+    }
+
+    return 'Rider Commands:\ngo online - Start receiving trips\ngo offline - Stop receiving trips\nmy status - View your info\naccept - Accept a trip\ndecline - Decline a trip\narrived - Notify customer you arrived\ncomplete - Finish trip\ncancel trip - Cancel current trip';
 }
 
-function getTripStatus(tripId) {
-    const trip = activeTrips[tripId];
-    if (!trip) return 'Trip not found.';
+// ============================================
+// CUSTOMER COMMANDS
+// ============================================
 
-    const rider = riders[trip.riderId];
-    let msg = '*Trip Status: ' + tripId + '*\n\n';
-    msg += 'From: ' + LOCATIONS[trip.pickup].name + '\n';
-    msg += 'To: ' + LOCATIONS[trip.dropoff].name + '\n';
-    msg += 'Price: ' + trip.price + ' KES\n';
-    msg += 'Rider: ' + (rider ? rider.name : 'Unknown') + '\n\n';
+function handleCustomerCommand(from, text, sock) {
+    const phone = cleanPhone(from);
+    const lower = text.toLowerCase().trim();
 
-    switch(trip.status) {
-        case 'finding_rider':
-            msg += 'Status: Finding rider...';
-            break;
-        case 'rider_assigned':
-            msg += 'Status: Rider assigned\n';
-            msg += 'Rider is on the way!\n';
-            msg += 'ETA: 3-5 minutes';
-            break;
-        case 'rider_arrived':
-            msg += 'Status: Rider has arrived!\n';
-            msg += 'Look for: ' + (rider ? rider.name : 'your rider');
-            break;
-        case 'in_progress':
-            msg += 'Status: Trip in progress\n';
-            msg += 'Heading to ' + LOCATIONS[trip.dropoff].name;
-            break;
-        case 'completed':
-            msg += 'Status: Trip completed\n';
-            msg += 'Thank you for using SafeRide!';
-            break;
-        default:
-            msg += 'Status: ' + trip.status;
-    }
+    // Check for active trip
+    const activeTrip = Object.values(activeTrips).find(t => t.customerPhone === phone && t.status !== 'completed' && t.status !== 'cancelled');
 
-    return msg;
-}
+    // Rating after trip
+    if (/^[1-5]$/.test(text.trim()) && !activeTrip) {
+        const completedTrip = Object.values(activeTrips).find(t => t.customerPhone === phone && t.status === 'completed' && !t.customerRated);
+        if (completedTrip) {
+            completedTrip.customerRated = true;
+            completedTrip.customerRating = parseInt(text.trim());
 
-function cancelTrip(tripId, session) {
-    const trip = activeTrips[tripId];
-    if (!trip) return 'No active trip to cancel.';
+            const rider = riders.find(r => r.id === completedTrip.riderId);
+            if (rider) {
+                const totalRating = (rider.rating * rider.tripsCompleted + completedTrip.customerRating) / (rider.tripsCompleted + 1);
+                rider.rating = Math.round(totalRating * 10) / 10;
+            }
 
-    if (trip.status === 'in_progress') {
-        return 'Cannot cancel - trip is already in progress!\n\n' +
-               'If there is an emergency, say "SOS".';
-    }
-
-    // Free up rider
-    const rider = riders[trip.riderId];
-    if (rider) rider.status = 'available';
-
-    trip.status = 'cancelled';
-    session.currentTrip = null;
-
-    return 'Trip ' + tripId + ' has been cancelled.\n\n' +
-           'No charges applied.\n' +
-           'Say "I need a ride" to book another.';
-}
-
-function buildEmergency(session) {
-    // In production, this would send alerts to emergency contact + police
-    let msg = '*EMERGENCY ALERT ACTIVATED*\n\n';
-    msg += 'We have notified:\n';
-    msg += '- Emergency services\n';
-    msg += '- Your emergency contact (if set)\n';
-    msg += '- Admin\n\n';
-
-    if (session.currentTrip) {
-        const trip = activeTrips[session.currentTrip];
-        if (trip) {
-            msg += 'Your trip details have been shared:\n';
-            msg += 'Trip ID: ' + trip.id + '\n';
-            msg += 'Rider: ' + riders[trip.riderId]?.name + '\n';
-            msg += 'From: ' + LOCATIONS[trip.pickup]?.name + '\n';
-            msg += 'To: ' + LOCATIONS[trip.dropoff]?.name + '\n\n';
+            return 'Thank you for rating!\nYou rated: ' + text.trim() + '/5\n\nYour feedback helps us improve SafeRide.';
         }
     }
 
-    msg += '*Call Emergency: ' + EMERGENCY_NUMBER + '*\n\n';
-    msg += 'Stay safe. Help is on the way.';
+    // SOS / Emergency
+    if (lower === 'sos' || lower === 'emergency' || lower === 'help emergency') {
+        const sosMsg = 'EMERGENCY ALERT!\n\nCustomer: ' + formatPhone(phone) + '\nTime: ' + new Date().toLocaleString() + '\n\nIf you are in danger:\n1. Share your live location\n2. Call police: 999 or 112\n3. Call SafeRide Admin: ' + formatPhone(ADMIN_NUMBER) + '\n\nWe are tracking your trip and have alerted authorities.';
 
-    // Log emergency for admin
-    console.log('EMERGENCY ALERT from ' + session.phone);
+        sock.sendMessage(ADMIN_NUMBER + '@s.whatsapp.net', { text: sosMsg });
 
-    return msg;
-}
-
-function buildHelp() {
-    let msg = '*' + APP_NAME + ' - Help*\n\n';
-    msg += '*Book a ride:*\n';
-    msg += '- "I need a ride from [place] to [place]"\n';
-    msg += '- "book from Meru Town to Makutano"\n';
-    msg += '- "take me to Kaaga"\n\n';
-    msg += '*Check price:*\n';
-    msg += '- "price from [place] to [place]"\n';
-    msg += '- "how much to [place]"\n\n';
-    msg += '*Trip management:*\n';
-    msg += '- "trip status" - Check your ride\n';
-    msg += '- "cancel trip" - Cancel booking\n\n';
-    msg += '*Safety:*\n';
-    msg += '- "SOS" or "emergency" - Alert authorities\n';
-    msg += '- "share trip" - Share with family\n\n';
-    msg += '*Other:*\n';
-    msg += '- "locations" - See all areas\n';
-    msg += '- "night pricing" - Understand night rates\n';
-    msg += '- "help" - This menu';
-    return msg;
-}
-
-function buildNightPricing() {
-    let msg = '*Night Pricing Policy*\n\n';
-    msg += 'Night hours: 8:00 PM - 6:00 AM\n\n';
-    msg += 'Fair premium: *+20% only*\n\n';
-    msg += 'Example:\n';
-    msg += '- Meru Town to Kaaga (day): 150 KES\n';
-    msg += '- Meru Town to Kaaga (night): 180 KES\n\n';
-    msg += 'Why we do this:\n';
-    msg += '- Protects riders (higher risk at night)\n';
-    msg += '- Protects customers (no surprise charges)\n';
-    msg += '- Prevents exploitation\n\n';
-    msg += '*We guarantee: No rider can charge more than the app price!*';
-    return msg;
-}
-
-function buildShareTrip(session) {
-    if (!session.currentTrip) {
-        return 'You do not have an active trip to share.\n\n' +
-               'Book a ride first: "I need a ride from [place] to [place]"';
-    }
-
-    const trip = activeTrips[session.currentTrip];
-    const shareLink = 'https://saferide.meru/track/' + trip.id;
-
-    let msg = '*Share Your Trip*\n\n';
-    msg += 'Send this to your family/friend:\n\n';
-    msg += 'I am taking a SafeRide from ' + LOCATIONS[trip.pickup].name + 
-           ' to ' + LOCATIONS[trip.dropoff].name + '.\n';
-    msg += 'Track my trip: ' + shareLink + '\n';
-    msg += 'Trip ID: ' + trip.id + '\n';
-    msg += 'Rider: ' + riders[trip.riderId]?.name + '\n\n';
-    msg += 'They can see your live location and trip progress.';
-
-    return msg;
-}
-
-// ============================================
-// MESSAGE PROCESSOR
-// ============================================
-
-function processMessage(text, session) {
-    text = text.trim();
-    const lowerText = text.toLowerCase();
-
-    // Greetings
-    if (/^(hi|hello|hey|hola|good morning|good afternoon|good evening|start|menu)/i.test(text)) {
-        return buildWelcome();
-    }
-
-    // Help
-    if (/^(help|how to|how do i|commands|options)/i.test(text)) {
-        return buildHelp();
-    }
-
-    // Locations
-    if (/(locations|areas|places|where do you go|which areas)/i.test(text)) {
-        return buildLocations();
-    }
-
-    // Price estimate
-    const priceMatch = text.match(/(?:price|how much|cost|fare)\s+(?:from\s+)?(.+?)\s+(?:to\s+)?(.+)/i);
-    if (priceMatch) {
-        return buildPriceEstimate(priceMatch[1], priceMatch[2]);
-    }
-
-    // Book ride - various patterns
-    const bookPatterns = [
-        /(?:book|need|want|get|take)\s+(?:a\s+)?(?:ride|trip|boda|bodaboda)\s+(?:from\s+)?(.+?)\s+(?:to\s+)?(.+)/i,
-        /(?:take me|send me)\s+(?:to\s+)?(.+)/i,
-        /(?:i am|i'm)\s+(?:at|in)\s+(.+?)\s+(?:going|heading)\s+(?:to\s+)?(.+)/i
-    ];
-
-    for (const pattern of bookPatterns) {
-        const match = text.match(pattern);
-        if (match) {
-            if (match[2]) {
-                return bookRide(session.phone + '@s.whatsapp.net', match[1], match[2], session);
-            } else {
-                // Pattern like "take me to Kaaga" - need to know current location
-                return 'Where are you now?\n\n' +
-                       'Say: "I need a ride from [your location] to ' + match[1] + '"';
+        if (activeTrip) {
+            const rider = riders.find(r => r.id === activeTrip.riderId);
+            if (rider) {
+                sock.sendMessage(rider.phone + '@s.whatsapp.net', { text: 'EMERGENCY ALERT: Your customer has triggered an SOS. Please ensure their safety and contact admin immediately.' });
             }
         }
-    }
 
-    // Simple "to [location]" when context exists
-    if (/^to\s+(.+)/i.test(text) && session.lastPickup) {
-        return bookRide(session.phone + '@s.whatsapp.net', session.lastPickup, text.match(/^to\s+(.+)/i)[1], session);
-    }
-
-    // Trip status
-    if (/(trip status|my ride|where is my rider|check trip)/i.test(text)) {
-        if (session.currentTrip) {
-            return getTripStatus(session.currentTrip);
-        }
-        return 'You do not have an active trip.\n\n' +
-               'Say: "I need a ride from [place] to [place]" to book.';
-    }
-
-    // Cancel trip
-    if (/(cancel trip|cancel my ride|cancel booking)/i.test(text)) {
-        if (session.currentTrip) {
-            return cancelTrip(session.currentTrip, session);
-        }
-        return 'You do not have an active trip to cancel.';
-    }
-
-    // Emergency / SOS
-    if (/(sos|emergency|help me|i am in danger|police|thief|robbery|attack)/i.test(text)) {
-        return buildEmergency(session);
+        return 'EMERGENCY ALERT SENT!\n\nAdmin has been notified.\n\nEmergency Numbers:\nPolice: 999 / 112\nSafeRide Admin: ' + formatPhone(ADMIN_NUMBER) + '\n\nStay safe. Help is on the way.';
     }
 
     // Share trip
-    if (/(share trip|share my ride|send location|family tracking)/i.test(text)) {
-        return buildShareTrip(session);
+    if (lower === 'share trip' || lower === 'share') {
+        if (!activeTrip) return 'No active trip to share.\nBook a ride first by typing your route.';
+
+        const rider = riders.find(r => r.id === activeTrip.riderId);
+        const shareMsg = 'SafeRide Trip Share\n\nTrip ID: ' + activeTrip.id + '\nFrom: ' + activeTrip.from + '\nTo: ' + activeTrip.to + '\nPrice: ' + activeTrip.price + ' KES\nRider: ' + (rider ? rider.name : 'Assigned') + '\nStatus: ' + activeTrip.status.toUpperCase() + '\n\nTrack: https://whatsapp-bot-1-p25f.onrender.com/trip/' + activeTrip.id;
+
+        return 'Share this message with your family/friends:\n\n' + shareMsg + '\n\nThey can track your trip in real-time.';
     }
 
-    // Night pricing explanation
-    if (/(night pricing|night rate|why expensive at night|night charge)/i.test(text)) {
-        return buildNightPricing();
-    }
+    // Cancel trip
+    if (lower === 'cancel trip' || lower === 'cancel') {
+        if (!activeTrip) return 'No active trip to cancel.';
 
-    // Rider info (for demo/verification)
-    if (/(rider info|who is my rider|driver details|rider verification)/i.test(text)) {
-        if (session.currentTrip) {
-            const trip = activeTrips[session.currentTrip];
-            const rider = riders[trip.riderId];
-            if (rider) {
-                let msg = '*Your Rider*\n\n';
-                msg += 'Name: ' + rider.name + '\n';
-                msg += 'Rating: ' + rider.rating + '/5\n';
-                msg += 'Trips completed: ' + rider.trips + '\n';
-                msg += 'Verified: ' + (rider.verified ? 'Yes' : 'No') + '\n\n';
-                msg += 'If rider details do not match, say "SOS" immediately!';
-                return msg;
-            }
+        activeTrip.status = 'cancelled';
+
+        if (activeTrip.riderPhone) {
+            const rider = riders.find(r => r.phone === activeTrip.riderPhone);
+            if (rider) rider.status = 'available';
+            sock.sendMessage(activeTrip.riderPhone + '@s.whatsapp.net', { text: 'Trip ' + activeTrip.id + ' has been cancelled by the customer.' });
         }
-        return 'No active rider information.';
+
+        delete activeTrips[activeTrip.id];
+        return 'Trip cancelled successfully.\nYou can book a new ride anytime.';
     }
 
-    // Thanks
-    if (/(thank|thanks|asante|shukran)/i.test(text)) {
-        return 'You are welcome!\n\n' +
-               'Ride safe with ' + APP_NAME + '.\n' +
-               'Message us anytime you need a ride.';
+    // Trip status
+    if (lower === 'trip status' || lower === 'status') {
+        if (!activeTrip) return 'No active trip.\nBook a ride by typing: "I need a ride from [location] to [location]"';
+
+        const rider = riders.find(r => r.id === activeTrip.riderId);
+        let statusMsg = 'Trip Status: ' + activeTrip.id + '\nFrom: ' + activeTrip.from + '\nTo: ' + activeTrip.to + '\nPrice: ' + activeTrip.price + ' KES\nStatus: ' + activeTrip.status.toUpperCase();
+
+        if (rider && activeTrip.status !== 'pending') {
+            statusMsg += '\nRider: ' + rider.name + '\nBike: ' + rider.bikeNumber;
+        }
+
+        return statusMsg;
     }
 
-    // Goodbye
-    if (/(bye|goodbye|see you|later)/i.test(text)) {
-        return 'Goodbye! Stay safe.\n\n' +
-               APP_NAME + ' is here whenever you need a ride.';
+    // Rider info
+    if (lower === 'rider info' || lower === 'my rider') {
+        if (!activeTrip) return 'No active trip.\nBook a ride first.';
+
+        const rider = riders.find(r => r.id === activeTrip.riderId);
+        if (!rider) return 'Rider information not available yet.';
+
+        return 'Your Rider:\nName: ' + rider.name + '\nRating: ' + rider.rating + '/5\nTrips Completed: ' + rider.tripsCompleted + '\nBike Number: ' + rider.bikeNumber + '\n\nIf you feel unsafe, reply "SOS" immediately.';
     }
 
-    // Fallback
-    return 'I did not understand that.\n\n' +
-           'Try:\n' +
-           '- "I need a ride from Meru Town to Makutano"\n' +
-           '- "price from Kaaga to Timau"\n' +
-           '- "locations" to see areas\n' +
-           '- "help" for all options';
+    // Price estimate
+    if (lower.startsWith('price') || lower.startsWith('how much')) {
+        const match = text.match(/from\s+(.+?)\s+to\s+(.+)/i);
+        if (!match) {
+            return 'To get a price estimate, type:\n"Price from [location] to [location]"\n\nExample: "Price from Meru Town to Makutano"\n\nAvailable locations:\n' + LOCATIONS.join(', ');
+        }
+
+        const from = match[1].trim();
+        const to = match[2].trim();
+
+        if (!LOCATIONS.includes(from) || !LOCATIONS.includes(to)) {
+            return 'Invalid location. Available locations:\n' + LOCATIONS.join(', ');
+        }
+
+        const price = getPrice(from, to);
+        const isNight = isNightTime();
+
+        return 'Price Estimate\n\nFrom: ' + from + '\nTo: ' + to + '\nTime: ' + (isNight ? 'Night (8PM - 6AM)' : 'Day (6AM - 8PM)') + '\n\nPrice: ' + price + ' KES\n\nNight rides have a small +20% premium for rider safety.';
+    }
+
+    // Locations list
+    if (lower === 'locations' || lower === 'areas') {
+        return 'We operate in these areas:\n\n' + LOCATIONS.map((l, i) => (i + 1) + '. ' + l).join('\n') + '\n\nType "price from [area] to [area]" for fare estimate.';
+    }
+
+    // Night pricing info
+    if (lower.includes('night') && lower.includes('price')) {
+        return 'Fair Night Pricing\n\nWe charge only +20% at night to ensure:\n1. Rider safety compensation\n2. Fair prices for customers\n3. No exploitation\n\nExample:\nMeru Town to Makutano:\nDay: 100 KES\nNight: 120 KES (only +20 KES)\n\nThis is much fairer than riders charging double or triple at night!';
+    }
+
+    // Help
+    if (lower === 'help') {
+        return '*Meru SafeRide - Help*\n\n*Book a Ride:*\n"I need a ride from [location] to [location]"\n\n*Check Price:*\n"Price from [location] to [location]"\n\n*Trip Status:*\n"trip status"\n\n*Safety:*\n"SOS" - Emergency alert\n"share trip" - Share with family\n"rider info" - Rider details\n\n*Other:*\n"locations" - Service areas\n"night pricing" - Fair night rates\n"cancel trip" - Cancel booking\n\nAvailable locations:\n' + LOCATIONS.slice(0, 5).join(', ') + '...';
+    }
+
+    return null;
+}
+
+// ============================================
+// BOOK RIDE
+// ============================================
+
+function bookRide(from, text, sock) {
+    const phone = cleanPhone(from);
+
+    const patterns = [
+        /(?:need|want|book)\s+a?\s*ride\s+from\s+(.+?)\s+to\s+(.+)/i,
+        /ride\s+from\s+(.+?)\s+to\s+(.+)/i,
+        /from\s+(.+?)\s+to\s+(.+?)(?:\s+now)?/i,
+        /(.+?)\s+to\s+(.+)/i
+    ];
+
+    let fromLoc = null, toLoc = null;
+    for (const pattern of patterns) {
+        const match = text.match(pattern);
+        if (match) {
+            fromLoc = match[1].trim();
+            toLoc = match[2].trim();
+            break;
+        }
+    }
+
+    if (!fromLoc || !toLoc) {
+        return 'To book a ride, type:\n"I need a ride from [location] to [location]"\n\nExample: "I need a ride from Meru Town to Makutano"\n\nAvailable locations:\n' + LOCATIONS.join(', ');
+    }
+
+    if (!LOCATIONS.includes(fromLoc) || !LOCATIONS.includes(toLoc)) {
+        return 'Invalid location. We operate in:\n' + LOCATIONS.join(', ') + '\n\nPlease check spelling or type "locations" for the list.';
+    }
+
+    const rider = findRider(fromLoc);
+    if (!rider) {
+        return 'Sorry, no riders available in ' + fromLoc + ' right now.\n\nOptions:\n1. Try a nearby location\n2. Call our hotline: ' + formatPhone(ADMIN_NUMBER) + '\n3. Try again in a few minutes';
+    }
+
+    const price = getPrice(fromLoc, toLoc);
+    const tripId = generateTripId();
+    const isNight = isNightTime();
+
+    activeTrips[tripId] = {
+        id: tripId,
+        customerPhone: phone,
+        customerName: 'Customer',
+        from: fromLoc,
+        to: toLoc,
+        price: price,
+        riderId: rider.id,
+        riderPhone: rider.phone,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        isNight: isNight
+    };
+
+    rider.status = 'busy';
+
+    // Notify rider
+    const riderAlert = 'New Ride Request!\n\nTrip ID: ' + tripId + '\nFrom: ' + fromLoc + '\nTo: ' + toLoc + '\nPrice: ' + price + ' KES' + (isNight ? ' (Night Rate)' : '') + '\n\nReply "accept" or "decline" within 2 minutes.';
+    sock.sendMessage(rider.phone + '@s.whatsapp.net', { text: riderAlert });
+
+    return 'Booking Requested!\n\nTrip ID: ' + tripId + '\nFrom: ' + fromLoc + '\nTo: ' + toLoc + '\nPrice: ' + price + ' KES' + (isNight ? '\n(Night Rate - Fair +20%)' : '') + '\n\nRider: ' + rider.name + '\nRating: ' + rider.rating + '/5\nTrips: ' + rider.tripsCompleted + '\n\nWaiting for rider to accept...\n\nReply "cancel trip" to cancel.\nReply "SOS" for emergency.';
+}
+
+// ============================================
+// MAIN MESSAGE HANDLER
+// ============================================
+
+function processMessage(from, text, sock) {
+    const phone = cleanPhone(from);
+    const lower = text.toLowerCase().trim();
+
+    // Admin commands
+    if (phone === ADMIN_NUMBER) {
+        if (lower.startsWith('verify ')) {
+            const riderId = text.split(' ')[1];
+            const rider = riders.find(r => r.id === riderId);
+            if (rider) {
+                rider.verified = true;
+                sock.sendMessage(rider.phone + '@s.whatsapp.net', { text: 'Congratulations! Your SafeRide account has been VERIFIED!\n\nYou can now go online and start receiving ride requests.\nReply "go online" to begin.' });
+                return 'Rider ' + riderId + ' verified successfully.';
+            }
+            return 'Rider not found.';
+        }
+
+        if (lower === 'all riders') {
+            return 'All Riders (' + riders.length + '):\n\n' + riders.map(r => r.id + ' | ' + r.name + ' | ' + r.location + ' | ' + r.status + ' | Verified: ' + r.verified).join('\n');
+        }
+
+        if (lower === 'all trips') {
+            const trips = Object.values(activeTrips);
+            if (trips.length === 0) return 'No active trips.';
+            return 'Active Trips (' + trips.length + '):\n\n' + trips.map(t => t.id + ' | ' + t.from + '->' + t.to + ' | ' + t.status + ' | ' + t.price + ' KES').join('\n');
+        }
+    }
+
+    // Registration flow
+    if (lower === 'register' || lower === 'register rider' || lower === 'signup') {
+        return handleRegistration(from, text, sock);
+    }
+
+    if (pendingRegistrations[phone]) {
+        return handleRegistration(from, text, sock);
+    }
+
+    // Rider commands
+    const rider = riders.find(r => r.phone === phone);
+    if (rider) {
+        const riderResponse = handleRiderCommand(from, text, sock);
+        if (riderResponse) return riderResponse;
+    }
+
+    // Customer commands
+    const customerResponse = handleCustomerCommand(from, text, sock);
+    if (customerResponse) return customerResponse;
+
+    // Book ride patterns
+    if (lower.includes('ride') || lower.includes('need') || lower.includes('want') || lower.includes('book') || (LOCATIONS.some(l => lower.includes(l.toLowerCase())) && lower.includes('to'))) {
+        return bookRide(from, text, sock);
+    }
+
+    // Natural language
+    if (['hello', 'hi', 'hey', 'good morning', 'good afternoon', 'good evening'].some(w => lower.includes(w))) {
+        return getTimeGreeting() + '! Welcome to Meru SafeRide!\n\nYour safe and affordable boda boda service.\n\nI can help you:\n1. Book a ride\n2. Check prices\n3. Find service areas\n\nJust type your route like:\n"I need a ride from Meru Town to Makutano"\n\nOr reply "help" for all options.';
+    }
+
+    if (['bye', 'goodbye', 'see you'].some(w => lower.includes(w))) {
+        return 'Goodbye! Ride safe with Meru SafeRide.\nReply anytime to book your next ride.';
+    }
+
+    if (['thank', 'thanks', 'asante'].some(w => lower.includes(w))) {
+        return 'You are welcome! Your safety is our priority.\nRide with Meru SafeRide anytime.';
+    }
+
+    if (['how are you', 'how r u'].some(w => lower.includes(w))) {
+        return 'I am doing great! Ready to help you get a safe ride.\nWhere would you like to go today?';
+    }
+
+    return 'I did not understand that.\n\nTo book a ride, type:\n"I need a ride from [location] to [location]"\n\nOr reply "help" for all options.';
 }
 
 // ============================================
 // WHATSAPP CONNECTION
 // ============================================
 
+let sock = null;
+let botReady = false;
+let currentQR = null;
+
 async function startBot() {
-    console.log('Starting ' + APP_NAME + '...');
-    connectionStatus = 'connecting';
+    console.log('Starting SafeRide Bot...');
 
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
     const { version } = await fetchLatestBaileysVersion();
@@ -590,116 +629,69 @@ async function startBot() {
     sock.ev.on('connection.update', ({ connection, qr }) => {
         if (qr) {
             currentQR = qr;
-            connectionStatus = 'qr_ready';
-            console.log('QR CODE READY');
+            console.log('\nQR CODE - Visit /qr to scan\n');
+            qrcode.generate(qr, { small: true });
         }
         if (connection === 'close') {
             botReady = false;
             currentQR = null;
-            connectionStatus = 'disconnected';
             setTimeout(startBot, 5000);
         }
         if (connection === 'open') {
-            console.log('BOT CONNECTED!');
+            console.log('\nSafeRide Bot Connected!');
             console.log('Number:', sock.user.id.split(':')[0]);
             botReady = true;
             currentQR = null;
-            connectionStatus = 'connected';
         }
     });
 
     sock.ev.on('messages.upsert', async (m) => {
         const msg = m.messages[0];
         if (!msg.key.fromMe && m.type === 'notify') {
-            const text = msg.message?.conversation || 
-                        msg.message?.extendedTextMessage?.text || '';
+            const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
             const from = msg.key.remoteJid;
-            const sender = msg.pushName || 'Customer';
 
-            console.log(sender + ': ' + text);
+            console.log('Message from', from, ':', text);
 
-            const session = getSession(from);
-            const reply = processMessage(text, session);
-
+            const reply = processMessage(from, text, sock);
             if (reply) {
                 await sock.sendMessage(from, { text: reply });
-                console.log('Replied: ' + reply.slice(0, 60));
             }
         }
     });
 }
 
 // ============================================
-// FRONTEND
+// WEB SERVER
 // ============================================
 
-app.get('/', async (req, res) => {
-    let qrHtml = '';
+app.get('/', (req, res) => {
+    const status = botReady ? 'online' : 'connecting';
+    const statusColor = botReady ? '#22c55e' : '#f59e0b';
 
+    let body = '';
     if (currentQR) {
-        try {
-            const qrDataUrl = await QRCode.toDataURL(currentQR, { 
-                width: 300, margin: 2,
-                color: { dark: '#000000', light: '#ffffff' }
-            });
-            qrHtml = '<div style="background:#f8f9fa;padding:30px;border-radius:16px;margin:20px 0;">' +
-                     '<h2>Scan QR Code with WhatsApp</h2>' +
-                     '<img src="' + qrDataUrl + '" style="width:280px;border-radius:12px;background:white;padding:15px;">' +
-                     '<p>Open WhatsApp > Settings > Linked Devices > Link a Device</p>' +
-                     '<button onclick="location.reload()" style="padding:14px 35px;border-radius:50px;background:linear-gradient(135deg,#667eea,#764ba2);color:white;border:none;cursor:pointer;font-size:16px;">Refresh QR</button>' +
-                     '</div>';
-        } catch (err) { console.error('QR error:', err); }
+        body = '<div style="text-align:center;padding:40px;"><h2>Scan QR Code with WhatsApp</h2><p>Open WhatsApp > Settings > Linked Devices > Link a Device</p><p style="color:#666;font-size:12px;margin-top:20px;">QR code generated. Refresh if needed.</p></div>';
     } else if (botReady) {
-        qrHtml = '<div style="background:#d4edda;padding:30px;border-radius:16px;margin:20px 0;color:#155724;">' +
-                 '<h2>Bot Connected!</h2>' +
-                 '<p>' + APP_NAME + ' is live.</p>' +
-                 '<p><strong>WhatsApp: +' + ADMIN_NUMBER + '</strong></p>' +
-                 '<p>Serving: Meru Town, Makutano, Kaaga, and more</p>' +
-                 '</div>';
+        body = '<div style="text-align:center;padding:40px;"><h1 style="color:#22c55e;">Online</h1><p>Meru SafeRide Bot is running</p><p>Number: +254114245222</p><p>Riders: ' + riders.length + ' | Active Trips: ' + Object.keys(activeTrips).length + '</p></div>';
     } else {
-        qrHtml = '<div style="background:#fff3cd;padding:30px;border-radius:16px;margin:20px 0;color:#856404;">' +
-                 '<h2>Connecting...</h2>' +
-                 '<p>Please wait while the bot initializes.</p>' +
-                 '<button onclick="location.reload()" style="padding:14px 35px;border-radius:50px;background:#e9ecef;color:#495057;border:none;cursor:pointer;font-size:16px;">Refresh</button>' +
-                 '</div>';
+        body = '<div style="text-align:center;padding:40px;"><h2>Connecting...</h2><p>Please wait while the bot initializes.</p></div>';
     }
 
-    res.send('<!DOCTYPE html>' +
-             '<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">' +
-             '<title>' + APP_NAME + '</title>' +
-             '<style>' +
-             'body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;margin:0;}' +
-             '.container{background:white;border-radius:24px;padding:40px;max-width:500px;width:100%;text-align:center;box-shadow:0 25px 50px rgba(0,0,0,0.25);}' +
-             'h1{color:#1a1a2e;font-size:26px;margin-bottom:5px;}' +
-             '.tagline{color:#888;font-size:14px;margin-bottom:20px;}' +
-             '.footer{margin-top:25px;padding-top:20px;border-top:1px solid #e9ecef;color:#888;font-size:12px;}' +
-             '</style></head><body>' +
-             '<div class="container">' +
-             '<div style="font-size:60px;margin-bottom:10px;">🏍️</div>' +
-             '<h1>' + APP_NAME + '</h1>' +
-             '<p class="tagline">Safe & Fair Boda Boda in Meru</p>' +
-             qrHtml +
-             '<div class="footer">' +
-             '<p>' + APP_NAME + ' - Ride Safe, Pay Fair</p>' +
-             '<p>Built with Baileys</p>' +
-             '</div></div></body></html>');
-});
-
-app.get('/api/status', (req, res) => {
-    res.json({ 
-        status: connectionStatus, 
-        botReady, 
-        admin: ADMIN_NUMBER, 
-        app: APP_NAME,
-        activeTrips: Object.keys(activeTrips).length,
-        availableRiders: Object.values(riders).filter(r => r.status === 'available').length
-    });
+    res.send('<!DOCTYPE html><html><head><title>Meru SafeRide</title><style>body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;margin:0;display:flex;align-items:center;justify-content:center;}.card{background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);max-width:500px;width:90%;overflow:hidden;}.header{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:30px;text-align:center;}.header h1{margin:0;font-size:28px;}.status-badge{display:inline-block;padding:8px 20px;border-radius:50px;font-size:14px;font-weight:bold;margin-top:10px;background:' + statusColor + ';color:#fff;}.body{padding:30px;}</style></head><body><div class="card"><div class="header"><h1>Meru SafeRide</h1><span class="status-badge">' + status.toUpperCase() + '</span></div><div class="body">' + body + '</div></div></body></html>');
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok', botReady }));
 
+app.get('/trip/:id', (req, res) => {
+    const trip = activeTrips[req.params.id];
+    if (!trip) return res.send('Trip not found');
+
+    const rider = riders.find(r => r.id === trip.riderId);
+    res.send('<!DOCTYPE html><html><head><title>Trip ' + trip.id + '</title><style>body{font-family:Arial;padding:40px;background:#f5f5f5;}.card{background:#fff;padding:30px;border-radius:10px;max-width:400px;margin:0 auto;}</style></head><body><div class="card"><h2>Trip ' + trip.id + '</h2><p><strong>From:</strong> ' + trip.from + '</p><p><strong>To:</strong> ' + trip.to + '</p><p><strong>Price:</strong> ' + trip.price + ' KES</p><p><strong>Status:</strong> ' + trip.status + '</p><p><strong>Rider:</strong> ' + (rider ? rider.name : 'Pending') + '</p><p><strong>Time:</strong> ' + new Date(trip.createdAt).toLocaleString() + '</p></div></body></html>');
+});
+
 app.listen(PORT, () => {
     console.log('Server on port ' + PORT);
-    console.log('URL: https://your-url.onrender.com');
     startBot();
 });
