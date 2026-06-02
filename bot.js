@@ -1,3 +1,9 @@
+// ============================================
+// MERU SAFERIDE BOT v3.0 - BODA BODA SERVICE
+// Fixed: Renamed all QR variables to avoid conflicts
+// Date: 2026-06-02
+// ============================================
+
 const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
@@ -7,20 +13,17 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ============================================
-// BODA BODA BOT - MERU SAFERIDE
+// CONFIGURATION
 // ============================================
 
 const OWNER_NUMBER = '254114245222';
 const ADMIN_NUMBER = '254114245222';
-const BOT_NAME = 'Meru SafeRide';
 
-// Locations
 const LOCATIONS = [
     'Meru Town', 'Makutano', 'Kaaga', 'Kathwana', 'Timau',
     'Maua', 'Nkuene', 'Giaki', 'Kianjai', 'Nkubu', 'Mitunguu'
 ];
 
-// Pricing (KES)
 const BASE_PRICES = {
     'Meru Town-Makutano': { day: 100, night: 120 },
     'Meru Town-Kaaga': { day: 150, night: 180 },
@@ -39,50 +42,37 @@ const BASE_PRICES = {
 const WITHIN_AREA_PRICE = { day: 50, night: 60 };
 const LONG_DISTANCE_BASE = { day: 200, night: 240 };
 
-// Demo riders
+// ============================================
+// STATE - SINGLE DECLARATION BLOCK
+// ============================================
+
 let riders = [
     {
-        id: 'RID-001',
-        name: 'Peter Kariuki',
-        phone: '254101646251',
-        idNumber: '12345678',
-        bikeNumber: 'KME 123A',
-        location: 'Meru Town',
-        status: 'available',
-        rating: 4.8,
-        tripsCompleted: 200,
-        registered: true,
-        verified: true,
-        registrationStep: 'complete'
+        id: 'RID-001', name: 'Peter Kariuki', phone: '254101646251',
+        idNumber: '12345678', bikeNumber: 'KME 123A', location: 'Meru Town',
+        status: 'available', rating: 4.8, tripsCompleted: 200,
+        registered: true, verified: true
     },
     {
-        id: 'RID-002',
-        name: 'John Mutua',
-        phone: '254717059203',
-        idNumber: '87654321',
-        bikeNumber: 'KME 456B',
-        location: 'Makutano',
-        status: 'available',
-        rating: 4.5,
-        tripsCompleted: 150,
-        registered: true,
-        verified: true,
-        registrationStep: 'complete'
+        id: 'RID-002', name: 'John Mutua', phone: '254717059203',
+        idNumber: '87654321', bikeNumber: 'KME 456B', location: 'Makutano',
+        status: 'available', rating: 4.5, tripsCompleted: 150,
+        registered: true, verified: true
     }
 ];
 
-// Active trips
 let activeTrips = {};
-
-// Pending registrations
 let pendingRegistrations = {};
 
-// QR code storage for web display
-let qrCodeData = null;
-let qrGeneratedAt = null;
+// WhatsApp connection state - ALL declared here, NOWHERE else
+let waSocket = null;
+let isBotReady = false;
+let currentQR = null;
+let qrTimestamp = null;
+let connAttempts = 0;
 
 // ============================================
-// HELPER FUNCTIONS
+// HELPERS
 // ============================================
 
 function isNightTime() {
@@ -94,16 +84,9 @@ function getPrice(from, to) {
     const key1 = from + '-' + to;
     const key2 = to + '-' + from;
     const isNight = isNightTime();
-
-    if (BASE_PRICES[key1]) {
-        return BASE_PRICES[key1][isNight ? 'night' : 'day'];
-    }
-    if (BASE_PRICES[key2]) {
-        return BASE_PRICES[key2][isNight ? 'night' : 'day'];
-    }
-    if (from === to) {
-        return WITHIN_AREA_PRICE[isNight ? 'night' : 'day'];
-    }
+    if (BASE_PRICES[key1]) return BASE_PRICES[key1][isNight ? 'night' : 'day'];
+    if (BASE_PRICES[key2]) return BASE_PRICES[key2][isNight ? 'night' : 'day'];
+    if (from === to) return WITHIN_AREA_PRICE[isNight ? 'night' : 'day'];
     return LONG_DISTANCE_BASE[isNight ? 'night' : 'day'];
 }
 
@@ -136,7 +119,7 @@ function getTimeGreeting() {
 }
 
 // ============================================
-// REGISTRATION FLOW
+// REGISTRATION
 // ============================================
 
 function handleRegistration(from, text, sock) {
@@ -145,7 +128,7 @@ function handleRegistration(from, text, sock) {
 
     if (!reg) {
         pendingRegistrations[phone] = { step: 'start', phone: phone };
-        return 'Welcome to SafeRide Rider Registration!\n\nTo register as a rider, I need some details:\n\nStep 1/5: What is your FULL NAME?\n(Example: Peter Kariuki)';
+        return 'Welcome to SafeRide Rider Registration!\n\nStep 1/5: What is your FULL NAME?\n(Example: Peter Kariuki)';
     }
 
     if (reg.step === 'start') {
@@ -180,27 +163,15 @@ function handleRegistration(from, text, sock) {
     }
 
     if (reg.step === 'photo') {
-        if (text.toLowerCase() === 'skip') {
-            reg.photoSent = false;
-        } else {
-            reg.photoSent = true;
-        }
+        reg.photoSent = text.toLowerCase() !== 'skip';
 
         const riderId = 'RID-' + String(riders.length + 1).padStart(3, '0');
         const newRider = {
-            id: riderId,
-            name: reg.name,
-            phone: phone,
-            idNumber: reg.idNumber,
-            bikeNumber: reg.bikeNumber,
-            location: reg.location,
-            status: 'offline',
-            rating: 0,
-            tripsCompleted: 0,
-            registered: true,
-            verified: false,
-            registrationStep: 'complete',
-            photoSent: reg.photoSent,
+            id: riderId, name: reg.name, phone: phone,
+            idNumber: reg.idNumber, bikeNumber: reg.bikeNumber,
+            location: reg.location, status: 'offline',
+            rating: 0, tripsCompleted: 0, registered: true,
+            verified: false, photoSent: reg.photoSent,
             registeredAt: new Date().toISOString()
         };
 
@@ -210,7 +181,7 @@ function handleRegistration(from, text, sock) {
         const adminMsg = 'New Rider Registration!\n\nName: ' + reg.name + '\nPhone: ' + formatPhone(phone) + '\nID: ' + reg.idNumber + '\nBike: ' + reg.bikeNumber + '\nLocation: ' + reg.location + '\nPhoto: ' + (reg.photoSent ? 'Sent' : 'Skipped') + '\n\nReply "verify ' + riderId + '" to approve.';
         sock.sendMessage(ADMIN_NUMBER + '@s.whatsapp.net', { text: adminMsg });
 
-        return 'Registration Complete!\n\nYour Details:\nName: ' + reg.name + '\nRider ID: ' + riderId + '\nBike: ' + reg.bikeNumber + '\nLocation: ' + reg.location + '\n\nStatus: PENDING VERIFICATION\nAn admin will verify your details within 24 hours.\n\nOnce verified, you will receive ride requests automatically.\n\nTo go online and start receiving trips, reply "go online".';
+        return 'Registration Complete!\n\nYour Details:\nName: ' + reg.name + '\nRider ID: ' + riderId + '\nBike: ' + reg.bikeNumber + '\nLocation: ' + reg.location + '\n\nStatus: PENDING VERIFICATION\nAn admin will verify your details within 24 hours.\n\nOnce verified, reply "go online" to start receiving trips.';
     }
 
     return 'Registration error. Please start over by typing "register".';
@@ -223,17 +194,12 @@ function handleRegistration(from, text, sock) {
 function handleRiderCommand(from, text, sock) {
     const phone = cleanPhone(from);
     const rider = riders.find(r => r.phone === phone);
-
-    if (!rider) {
-        return 'You are not registered as a rider. Reply "register" to sign up.';
-    }
+    if (!rider) return 'You are not registered as a rider. Reply "register" to sign up.';
 
     const cmd = text.toLowerCase().trim();
 
     if (cmd === 'go online' || cmd === 'online') {
-        if (!rider.verified) {
-            return 'Your account is pending verification. Please wait for admin approval.';
-        }
+        if (!rider.verified) return 'Your account is pending verification. Please wait for admin approval.';
         rider.status = 'available';
         return 'You are now ONLINE!\n\nYou will receive ride requests for ' + rider.location + '.\n\nReply "go offline" to stop receiving requests.';
     }
@@ -589,15 +555,9 @@ function processMessage(from, text, sock) {
 // WHATSAPP CONNECTION
 // ============================================
 
-let sock = null;
-let botReady = false;
-let qrCodeData = null;
-let qrGeneratedAt = null;
-let connectionAttempts = 0;
-
 async function startBot() {
-    connectionAttempts++;
-    console.log('Starting SafeRide Bot... Attempt ' + connectionAttempts);
+    connAttempts++;
+    console.log('Starting SafeRide Bot... Attempt ' + connAttempts);
 
     try {
         const { state, saveCreds } = await useMultiFileAuthState('auth_info');
@@ -605,7 +565,7 @@ async function startBot() {
 
         const logger = pino({ level: 'silent' });
 
-        sock = makeWASocket({
+        waSocket = makeWASocket({
             version,
             auth: state,
             logger,
@@ -614,14 +574,14 @@ async function startBot() {
             markOnlineOnConnect: true
         });
 
-        sock.ev.on('creds.update', saveCreds);
+        waSocket.ev.on('creds.update', saveCreds);
 
-        sock.ev.on('connection.update', (update) => {
+        waSocket.ev.on('connection.update', (update) => {
             const { connection, qr, lastDisconnect } = update;
 
             if (qr) {
-                qrCodeData = qr;
-                qrGeneratedAt = Date.now();
+                currentQR = qr;
+                qrTimestamp = Date.now();
                 console.log('\n=== QR CODE GENERATED ===');
                 console.log('Visit your site to scan the QR code');
                 console.log('QR expires in ~60 seconds - scan quickly!\n');
@@ -629,8 +589,8 @@ async function startBot() {
             }
 
             if (connection === 'close') {
-                botReady = false;
-                qrCodeData = null;
+                isBotReady = false;
+                currentQR = null;
                 const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
                 console.log('Connection closed. Reconnecting:', shouldReconnect);
                 if (shouldReconnect) {
@@ -640,15 +600,15 @@ async function startBot() {
 
             if (connection === 'open') {
                 console.log('\n=== SAFE RIDE BOT CONNECTED ===');
-                console.log('Phone:', sock.user.id.split(':')[0]);
-                botReady = true;
-                qrCodeData = null;
-                qrGeneratedAt = null;
-                connectionAttempts = 0;
+                console.log('Phone:', waSocket.user.id.split(':')[0]);
+                isBotReady = true;
+                currentQR = null;
+                qrTimestamp = null;
+                connAttempts = 0;
             }
         });
 
-        sock.ev.on('messages.upsert', async (m) => {
+        waSocket.ev.on('messages.upsert', async (m) => {
             const msg = m.messages[0];
             if (!msg.key.fromMe && m.type === 'notify') {
                 const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text || '';
@@ -656,9 +616,9 @@ async function startBot() {
 
                 console.log('Message from', from, ':', text.substring(0, 50));
 
-                const reply = processMessage(from, text, sock);
+                const reply = processMessage(from, text, waSocket);
                 if (reply) {
-                    await sock.sendMessage(from, { text: reply });
+                    await waSocket.sendMessage(from, { text: reply });
                 }
             }
         });
@@ -670,13 +630,13 @@ async function startBot() {
 }
 
 // ============================================
-// WEB SERVER WITH QR DISPLAY
+// WEB SERVER
 // ============================================
 
 function getStatusHTML() {
-    const isOnline = botReady;
-    const hasQR = !!qrCodeData;
-    const qrAge = qrGeneratedAt ? Math.floor((Date.now() - qrGeneratedAt) / 1000) : 0;
+    const isOnline = isBotReady;
+    const hasQR = !!currentQR;
+    const qrAge = qrTimestamp ? Math.floor((Date.now() - qrTimestamp) / 1000) : 0;
     const qrExpired = qrAge > 60;
 
     let statusBadge, statusText, bodyContent;
@@ -703,7 +663,7 @@ function getStatusHTML() {
             '<p style="color:#666;font-size:14px;margin-bottom:15px;">Open WhatsApp > Settings > Linked Devices > Link a Device</p>' +
             '<div style="background:#fff;border:3px solid #f59e0b;border-radius:15px;padding:20px;display:inline-block;margin:10px auto;">' +
             '<div style="font-family:monospace;font-size:10px;line-height:10px;white-space:pre;letter-spacing:1px;">' + 
-            qrcode.generate(qrCodeData, { small: true }) + '</div>' +
+            qrcode.generate(currentQR, { small: true }) + '</div>' +
             '</div>' +
             '<p style="color:#dc2626;font-size:14px;font-weight:bold;margin-top:10px;">&#9200; QR expires in ' + (60 - qrAge) + ' seconds!</p>' +
             '<p style="color:#888;font-size:12px;margin-top:15px;">If QR expired, <a href="/restart" style="color:#667eea;">click here to refresh</a></p>' +
@@ -754,11 +714,11 @@ app.get('/', (req, res) => {
 });
 
 app.get('/qr', (req, res) => {
-    if (!qrCodeData) {
+    if (!currentQR) {
         return res.send('<html><body style="padding:40px;text-align:center;font-family:Arial;"><h2>No QR Code Available</h2><p>The bot may already be connected or still initializing.</p><p><a href="/">Go to home page</a></p></body></html>');
     }
 
-    const qrAscii = qrcode.generate(qrCodeData, { small: true });
+    const qrAscii = qrcode.generate(currentQR, { small: true });
     res.send('<html><head><title>QR Code - Meru SafeRide</title><meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
         '<body style="font-family:monospace;padding:20px;background:#000;color:#0f0;text-align:center;">' +
         '<h2 style="color:#fff;margin-bottom:10px;">&#128241; Scan with WhatsApp</h2>' +
@@ -770,11 +730,11 @@ app.get('/qr', (req, res) => {
 });
 
 app.get('/restart', (req, res) => {
-    qrCodeData = null;
-    qrGeneratedAt = null;
-    botReady = false;
-    if (sock) {
-        try { sock.end(); } catch(e) {}
+    currentQR = null;
+    qrTimestamp = null;
+    isBotReady = false;
+    if (waSocket) {
+        try { waSocket.end(); } catch(e) {}
     }
     setTimeout(startBot, 2000);
     res.send('<html><body style="padding:40px;text-align:center;font-family:Arial;"><h2>Restarting Bot...</h2><p>Please wait 10 seconds and refresh the page.</p><p><a href="/">Go to home page</a></p><script>setTimeout(function(){window.location="/";},10000);</script></body></html>');
@@ -783,9 +743,9 @@ app.get('/restart', (req, res) => {
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
-        botReady, 
-        hasQR: !!qrCodeData,
-        qrAge: qrGeneratedAt ? Math.floor((Date.now() - qrGeneratedAt) / 1000) : null,
+        botReady: isBotReady, 
+        hasQR: !!currentQR,
+        qrAge: qrTimestamp ? Math.floor((Date.now() - qrTimestamp) / 1000) : null,
         riders: riders.length,
         activeTrips: Object.keys(activeTrips).length,
         timestamp: new Date().toISOString()
