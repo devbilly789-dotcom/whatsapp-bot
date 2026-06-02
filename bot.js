@@ -7,124 +7,142 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ============================================
-// SHOP CONFIGURATION
+// BODA BODA BOT CONFIGURATION
 // ============================================
 
-const SHOP_NAME = "Billy's Shop";
-const OWNER_NUMBER = '254114245222';
-const CURRENCY = 'KES';
+const APP_NAME = 'Meru Boda Boda SafeRide';
+const ADMIN_NUMBER = '254114245222';
+const EMERGENCY_NUMBER = '999'; // Police
 
-const PRODUCTS = [
-    { id: 1, name: 'Wireless Earbuds', price: 1500, category: 'Electronics', description: 'Bluetooth 5.0, 20hr battery', inStock: true, allowDiscount: true, minPrice: 1200 },
-    { id: 2, name: 'Phone Case', price: 500, category: 'Accessories', description: 'Shockproof, all models', inStock: true, allowDiscount: true, minPrice: 400 },
-    { id: 3, name: 'Power Bank 20000mAh', price: 2500, category: 'Electronics', description: 'Fast charging, dual USB', inStock: true, allowDiscount: false, minPrice: 2500 },
-    { id: 4, name: 'USB-C Cable', price: 300, category: 'Accessories', description: 'Braided, 2 meters', inStock: true, allowDiscount: true, minPrice: 250 },
-    { id: 5, name: 'Screen Protector', price: 400, category: 'Accessories', description: 'Tempered glass', inStock: false, allowDiscount: true, minPrice: 350 },
-    { id: 6, name: 'Bluetooth Speaker', price: 3500, category: 'Electronics', description: 'Waterproof, 12hr playtime', inStock: true, allowDiscount: true, minPrice: 3000 },
-    { id: 7, name: 'Laptop Stand', price: 1200, category: 'Office', description: 'Adjustable, aluminum', inStock: true, allowDiscount: true, minPrice: 1000 },
-    { id: 8, name: 'Webcam HD', price: 4500, category: 'Electronics', description: '1080p, built-in mic', inStock: true, allowDiscount: false, minPrice: 4500 }
-];
-
-const DISCOUNT_CODES = {
-    'BILLY10': { discount: 0.10, type: 'percentage', description: '10% off your order' },
-    'SAVE20': { discount: 0.20, type: 'percentage', description: '20% off your order' },
-    'WELCOME': { discount: 0.15, type: 'percentage', description: '15% off for new customers' },
-    'FLASH50': { discount: 0.50, type: 'percentage', description: '50% flash sale (limited time)' }
+// Locations in Meru
+const LOCATIONS = {
+    'meru town': { name: 'Meru Town', lat: 0.0500, lng: 37.6500 },
+    'makutano': { name: 'Makutano', lat: 0.0600, lng: 37.6400 },
+    'kaaga': { name: 'Kaaga', lat: 0.0700, lng: 37.6600 },
+    'kathwana': { name: 'Kathwana', lat: 0.0800, lng: 37.6300 },
+    'timau': { name: 'Timau', lat: 0.0900, lng: 37.6700 },
+    'maua': { name: 'Maua', lat: 0.1000, lng: 37.6800 },
+    'nkuene': { name: 'Nkuene', lat: 0.0400, lng: 37.6200 },
+    'giaki': { name: 'Giaki', lat: 0.0300, lng: 37.6100 }
 };
 
-const BUSINESS_HOURS = {
-    monday: '8:00 AM - 6:00 PM',
-    tuesday: '8:00 AM - 6:00 PM',
-    wednesday: '8:00 AM - 6:00 PM',
-    thursday: '8:00 AM - 6:00 PM',
-    friday: '8:00 AM - 8:00 PM',
-    saturday: '9:00 AM - 5:00 PM',
-    sunday: 'Closed'
+// Base prices between locations (KES, daytime)
+const ROUTE_PRICES = {
+    'meru town-makutano': 100,
+    'meru town-kaaga': 150,
+    'meru town-kathwana': 120,
+    'meru town-timau': 200,
+    'meru town-maua': 250,
+    'meru town-nkuene': 80,
+    'meru town-giaki': 90,
+    'makutano-kaaga': 80,
+    'makutano-kathwana': 70,
+    'makutano-timau': 180,
+    'makutano-maua': 220,
+    'kaaga-kathwana': 60,
+    'kaaga-timau': 150,
+    'kaaga-maua': 200,
+    'kathwana-timau': 140,
+    'kathwana-maua': 180,
+    'timau-maua': 100
 };
 
-const PAYMENT_METHODS = [
-    'M-Pesa',
-    'Bank Transfer',
-    'Cash on Delivery'
+const NIGHT_START = 20; // 8 PM
+const NIGHT_END = 6;    // 6 AM
+const NIGHT_MULTIPLIER = 1.2; // 20% premium (fair, not exploitative)
+
+// ============================================
+// DATABASE (In-memory, replace with real DB for production)
+// ============================================
+
+const riders = {};
+const customers = {};
+const activeTrips = {};
+const tripHistory = [];
+
+// Demo riders (in production, riders register via admin)
+const demoRiders = [
+    { id: 'R001', name: 'John Mwenda', phone: '254712345001', location: 'meru town', status: 'available', rating: 4.5, trips: 120, verified: true },
+    { id: 'R002', name: 'Peter Kariuki', phone: '254712345002', location: 'makutano', status: 'available', rating: 4.8, trips: 200, verified: true },
+    { id: 'R003', name: 'James Mutua', phone: '254712345003', location: 'kaaga', status: 'available', rating: 4.2, trips: 80, verified: true },
+    { id: 'R004', name: 'Daniel Ochieng', phone: '254712345004', location: 'meru town', status: 'busy', rating: 4.6, trips: 150, verified: true },
+    { id: 'R005', name: 'Michael Kimani', phone: '254712345005', location: 'kathwana', status: 'available', rating: 4.9, trips: 300, verified: true }
 ];
 
+demoRiders.forEach(r => riders[r.id] = r);
+
+// ============================================
 // STATE
+// ============================================
+
 let currentQR = null;
 let sock = null;
 let botReady = false;
 let connectionStatus = 'initializing';
-const customerSessions = {};
 
 function getSession(jid) {
-    if (!customerSessions[jid]) {
-        customerSessions[jid] = {
-            cart: [],
-            lastActivity: Date.now(),
-            awaiting: null,
-            orderHistory: [],
-            discountCode: null,
-            bargainingProduct: null
+    if (!customers[jid]) {
+        customers[jid] = {
+            phone: jid.split('@')[0],
+            name: null,
+            currentTrip: null,
+            tripCount: 0,
+            rating: 5.0,
+            emergencyContact: null
         };
     }
-    return customerSessions[jid];
+    return customers[jid];
 }
 
-function formatPrice(price) {
-    return CURRENCY + ' ' + price.toLocaleString();
-}
+// ============================================
+// PRICING ENGINE
+// ============================================
 
-function getGreeting() {
+function isNightTime() {
     const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
+    return hour >= NIGHT_START || hour < NIGHT_END;
+}
+
+function getPrice(pickup, dropoff) {
+    const key1 = pickup + '-' + dropoff;
+    const key2 = dropoff + '-' + pickup;
+
+    let basePrice = ROUTE_PRICES[key1] || ROUTE_PRICES[key2];
+
+    // If route not in database, estimate
+    if (!basePrice) {
+        basePrice = 100; // Default
+    }
+
+    const night = isNightTime();
+    const finalPrice = night ? Math.round(basePrice * NIGHT_MULTIPLIER) : basePrice;
+
+    return {
+        basePrice,
+        finalPrice,
+        night,
+        premium: night ? Math.round(basePrice * (NIGHT_MULTIPLIER - 1)) : 0
+    };
 }
 
 // ============================================
-// PRODUCT FINDER
+// RIDER MATCHING
 // ============================================
 
-function findProduct(input) {
-    if (!input) return null;
-    const search = input.toLowerCase().trim();
-
-    // Try exact ID match first
-    const id = parseInt(search);
-    if (!isNaN(id)) {
-        const byId = PRODUCTS.find(p => p.id === id);
-        if (byId) return byId;
-    }
-
-    // Try exact name match
-    let product = PRODUCTS.find(p => p.name.toLowerCase() === search);
-    if (product) return product;
-
-    // Try partial name match
-    product = PRODUCTS.find(p => p.name.toLowerCase().includes(search));
-    if (product) return product;
-
-    // Try matching individual words
-    const words = search.split(/\s+/);
-    for (const word of words) {
-        if (word.length < 3) continue; // Skip short words
-        product = PRODUCTS.find(p => p.name.toLowerCase().includes(word));
-        if (product) return product;
-    }
-
-    // Try category match
-    product = PRODUCTS.find(p => p.category.toLowerCase().includes(search));
-    if (product) return product;
-
-    return null;
-}
-
-function findMultipleProducts(input) {
-    const search = input.toLowerCase().trim();
-    return PRODUCTS.filter(p => 
-        p.name.toLowerCase().includes(search) ||
-        p.category.toLowerCase().includes(search) ||
-        p.description.toLowerCase().includes(search)
+function findNearestRider(location) {
+    const available = Object.values(riders).filter(r => 
+        r.status === 'available' && r.verified
     );
+
+    if (available.length === 0) return null;
+
+    // Simple matching: same location first, then any available
+    const sameLocation = available.filter(r => r.location === location);
+    if (sameLocation.length > 0) {
+        return sameLocation[0]; // Return first available in same area
+    }
+
+    return available[0]; // Return any available rider
 }
 
 // ============================================
@@ -132,378 +150,293 @@ function findMultipleProducts(input) {
 // ============================================
 
 function buildWelcome() {
-    return getGreeting() + '! Welcome to ' + SHOP_NAME + '\n\n' +
-           'I can help you:\n' +
-           '- Browse products (say "show products")\n' +
-           '- Get price list (say "pricelist")\n' +
-           '- Buy directly (just type product name like "laptop stand")\n' +
-           '- Bargain (say "laptop stand 900")\n' +
-           '- Ask about delivery, hours, payment\n\n' +
-           'What would you like?';
-}
+    const hour = new Date().getHours();
+    let greeting = 'Good morning';
+    if (hour >= 12) greeting = 'Good afternoon';
+    if (hour >= 17) greeting = 'Good evening';
 
-function buildProducts() {
-    let msg = '*Our Products*\n\n';
-    PRODUCTS.forEach(p => {
-        const stock = p.inStock ? 'In Stock' : 'Out of Stock';
-        const discount = p.allowDiscount ? ' *' : '';
-        msg += p.id + '. ' + p.name + '\n';
-        msg += '   Price: ' + formatPrice(p.price) + discount + '\n';
-        msg += '   ' + p.description + '\n';
-        msg += '   Status: ' + stock + '\n\n';
-    });
-    msg += '* = Discount available\n\n';
-    msg += 'To buy, just type the product name\n';
-    msg += 'Example: "laptop stand" or "i want earbuds"';
+    let msg = greeting + '! Welcome to *' + APP_NAME + '* \n\n';
+    msg += 'Your safe and fair boda boda service in Meru.\n\n';
+    msg += 'What I can do:\n';
+    msg += '- Book a ride (say: "I need a ride from [place] to [place]")\n';
+    msg += '- Check prices (say: "price from [place] to [place]")\n';
+    msg += '- See locations (say: "locations")\n';
+    msg += '- Emergency (say: "SOS" or "emergency")\n';
+    msg += '- Share trip with family\n\n';
+
+    if (isNightTime()) {
+        msg += '*Night mode active* - Fair 20% premium applied\n';
+        msg += 'No overcharging, guaranteed!\n\n';
+    }
+
+    msg += 'Where do you want to go today?';
     return msg;
 }
 
-function buildPriceList() {
-    let msg = '*PRICE LIST*\n';
-    msg += '============\n\n';
-
-    const categories = [...new Set(PRODUCTS.map(p => p.category))];
-
-    categories.forEach(cat => {
-        msg += cat.toUpperCase() + ':\n';
-        msg += '-'.repeat(cat.length + 1) + '\n';
-
-        PRODUCTS.filter(p => p.category === cat).forEach(p => {
-            const stock = p.inStock ? '' : ' [OUT OF STOCK]';
-            const discount = p.allowDiscount ? ' *' : '';
-            msg += p.id + '. ' + p.name + '\n';
-            msg += '   Price: ' + formatPrice(p.price) + discount + stock + '\n';
-            if (p.allowDiscount) {
-                msg += '   Bargain from: ' + formatPrice(p.minPrice) + '\n';
-            }
-            msg += '\n';
-        });
+function buildLocations() {
+    let msg = '*Available Locations*\n\n';
+    Object.entries(LOCATIONS).forEach(([key, loc]) => {
+        msg += '- ' + loc.name + '\n';
     });
-
-    msg += '============\n';
-    msg += '* = Bargain available\n\n';
-    msg += 'To buy, just type the product name\n';
-    msg += 'To bargain, type: "[product] [price]"\n';
-    msg += 'Example: "laptop stand 900" or "earbuds 1300"';
-
+    msg += '\nSay: "I need a ride from [location] to [location]"\n';
+    msg += 'Example: "I need a ride from Meru Town to Makutano"';
     return msg;
 }
 
-function buildProductDetails(product) {
-    let msg = '*' + product.name + '*\n\n';
-    msg += 'Price: ' + formatPrice(product.price) + '\n';
-    msg += 'Category: ' + product.category + '\n';
-    msg += product.description + '\n';
-    msg += 'Status: ' + (product.inStock ? 'In Stock' : 'Out of Stock') + '\n';
+function buildPriceEstimate(pickup, dropoff) {
+    const pickupKey = Object.keys(LOCATIONS).find(k => k.includes(pickup.toLowerCase()) || LOCATIONS[k].name.toLowerCase().includes(pickup.toLowerCase()));
+    const dropoffKey = Object.keys(LOCATIONS).find(k => k.includes(dropoff.toLowerCase()) || LOCATIONS[k].name.toLowerCase().includes(dropoff.toLowerCase()));
 
-    if (product.allowDiscount) {
-        msg += '\n*Discount Available!*\n';
-        msg += 'Bargain price from: ' + formatPrice(product.minPrice) + '\n';
-        msg += 'Type: "' + product.name + ' [your price]" to bargain\n';
-        msg += 'Example: "' + product.name + ' ' + (product.minPrice + 100) + '"';
+    if (!pickupKey || !dropoffKey) {
+        return 'Sorry, I do not recognize one of those locations.\n\n' +
+               'Available locations:\n' +
+               Object.values(LOCATIONS).map(l => '- ' + l.name).join('\n') + '\n\n' +
+               'Say: "price from [location] to [location]"';
+    }
+
+    if (pickupKey === dropoffKey) {
+        return 'Pickup and dropoff cannot be the same place!';
+    }
+
+    const pricing = getPrice(pickupKey, dropoffKey);
+
+    let msg = '*Price Estimate*\n\n';
+    msg += 'From: ' + LOCATIONS[pickupKey].name + '\n';
+    msg += 'To: ' + LOCATIONS[dropoffKey].name + '\n\n';
+    msg += 'Base price: ' + pricing.basePrice + ' KES\n';
+
+    if (pricing.night) {
+        msg += 'Night premium (20%): +' + pricing.premium + ' KES\n';
+        msg += '*Total: ' + pricing.finalPrice + ' KES*\n\n';
+        msg += 'Fair night pricing - no overcharging!';
     } else {
-        msg += '\n*Fixed Price* (no discounts)';
+        msg += '*Total: ' + pricing.finalPrice + ' KES*\n\n';
+        msg += 'Daytime rate';
     }
 
-    msg += '\n\nTo buy now, just reply with the product name:\n';
-    msg += '"' + product.name + '"';
+    msg += '\n\nTo book, say: "book from ' + LOCATIONS[pickupKey].name + ' to ' + LOCATIONS[dropoffKey].name + '"';
+    return msg;
+}
+
+function bookRide(customerJid, pickup, dropoff, session) {
+    const pickupKey = Object.keys(LOCATIONS).find(k => k.includes(pickup.toLowerCase()) || LOCATIONS[k].name.toLowerCase().includes(pickup.toLowerCase()));
+    const dropoffKey = Object.keys(LOCATIONS).find(k => k.includes(dropoff.toLowerCase()) || LOCATIONS[k].name.toLowerCase().includes(dropoff.toLowerCase()));
+
+    if (!pickupKey || !dropoffKey) {
+        return 'Sorry, I do not recognize one of those locations. Say "locations" to see available areas.';
+    }
+
+    if (pickupKey === dropoffKey) {
+        return 'Pickup and dropoff cannot be the same place!';
+    }
+
+    // Check if customer already has active trip
+    if (session.currentTrip) {
+        return 'You already have an active trip!\n\n' +
+               'Trip ID: ' + session.currentTrip + '\n' +
+               'Say "trip status" to check or "cancel trip" to cancel.';
+    }
+
+    const pricing = getPrice(pickupKey, dropoffKey);
+    const rider = findNearestRider(pickupKey);
+
+    if (!rider) {
+        return 'Sorry, no riders are available right now in ' + LOCATIONS[pickupKey].name + '.\n\n' +
+               'Please try again in a few minutes or try a different pickup location.';
+    }
+
+    // Create trip
+    const tripId = 'TRP-' + Date.now().toString().slice(-8);
+    const trip = {
+        id: tripId,
+        customerJid: customerJid,
+        customerPhone: session.phone,
+        riderId: rider.id,
+        riderPhone: rider.phone,
+        pickup: pickupKey,
+        dropoff: dropoffKey,
+        price: pricing.finalPrice,
+        basePrice: pricing.basePrice,
+        nightPremium: pricing.premium,
+        status: 'finding_rider',
+        createdAt: new Date(),
+        acceptedAt: null,
+        startedAt: null,
+        completedAt: null
+    };
+
+    activeTrips[tripId] = trip;
+    session.currentTrip = tripId;
+
+    // Mark rider as busy
+    rider.status = 'busy';
+
+    // Send alert to rider (in production, this would message rider's WhatsApp)
+    console.log('RIDER ALERT to ' + rider.phone + ': New ride ' + tripId + ' from ' + LOCATIONS[pickupKey].name + ' to ' + LOCATIONS[dropoffKey].name + ' for ' + pricing.finalPrice + ' KES');
+
+    let msg = '*Booking Requested!*\n\n';
+    msg += 'Trip ID: ' + tripId + '\n';
+    msg += 'From: ' + LOCATIONS[pickupKey].name + '\n';
+    msg += 'To: ' + LOCATIONS[dropoffKey].name + '\n';
+    msg += 'Price: ' + pricing.finalPrice + ' KES\n';
+    if (pricing.night) {
+        msg += '(Includes fair night premium)\n';
+    }
+    msg += '\n';
+    msg += 'Finding nearest rider...\n\n';
+    msg += 'Rider: ' + rider.name + '\n';
+    msg += 'Rating: ' + rider.rating + '/5\n';
+    msg += 'Trips completed: ' + rider.trips + '\n\n';
+    msg += 'Waiting for rider to accept...\n';
+    msg += 'You will receive confirmation shortly.';
 
     return msg;
 }
 
-function buildSearch(term) {
-    const results = findMultipleProducts(term);
+function getTripStatus(tripId) {
+    const trip = activeTrips[tripId];
+    if (!trip) return 'Trip not found.';
 
-    if (results.length === 0) return 'No products found for "' + term + '".';
+    const rider = riders[trip.riderId];
+    let msg = '*Trip Status: ' + tripId + '*\n\n';
+    msg += 'From: ' + LOCATIONS[trip.pickup].name + '\n';
+    msg += 'To: ' + LOCATIONS[trip.dropoff].name + '\n';
+    msg += 'Price: ' + trip.price + ' KES\n';
+    msg += 'Rider: ' + (rider ? rider.name : 'Unknown') + '\n\n';
 
-    let msg = 'Results for "' + term + '":\n\n';
-    results.forEach(p => {
-        const discount = p.allowDiscount ? ' *' : '';
-        msg += p.id + '. ' + p.name + ' - ' + formatPrice(p.price) + discount + '\n';
-    });
-    msg += '\n* = Bargain available\n';
-    msg += 'Type product name to buy or get details';
+    switch(trip.status) {
+        case 'finding_rider':
+            msg += 'Status: Finding rider...';
+            break;
+        case 'rider_assigned':
+            msg += 'Status: Rider assigned\n';
+            msg += 'Rider is on the way!\n';
+            msg += 'ETA: 3-5 minutes';
+            break;
+        case 'rider_arrived':
+            msg += 'Status: Rider has arrived!\n';
+            msg += 'Look for: ' + (rider ? rider.name : 'your rider');
+            break;
+        case 'in_progress':
+            msg += 'Status: Trip in progress\n';
+            msg += 'Heading to ' + LOCATIONS[trip.dropoff].name;
+            break;
+        case 'completed':
+            msg += 'Status: Trip completed\n';
+            msg += 'Thank you for using SafeRide!';
+            break;
+        default:
+            msg += 'Status: ' + trip.status;
+    }
+
     return msg;
 }
 
-function buildCart(session) {
-    if (!session.cart || session.cart.length === 0) {
-        return 'Your cart is empty.\n\nBrowse products by saying "show products" or just type a product name like "laptop stand"';
+function cancelTrip(tripId, session) {
+    const trip = activeTrips[tripId];
+    if (!trip) return 'No active trip to cancel.';
+
+    if (trip.status === 'in_progress') {
+        return 'Cannot cancel - trip is already in progress!\n\n' +
+               'If there is an emergency, say "SOS".';
     }
 
-    let total = 0;
-    let msg = '*Your Cart*\n\n';
+    // Free up rider
+    const rider = riders[trip.riderId];
+    if (rider) rider.status = 'available';
 
-    session.cart.forEach((item, i) => {
-        const product = PRODUCTS.find(p => p.id === item.id);
-        const price = item.discountedPrice || product.price;
-        const subtotal = price * item.qty;
-        total += subtotal;
+    trip.status = 'cancelled';
+    session.currentTrip = null;
 
-        msg += (i + 1) + '. ' + product.name + '\n';
-        if (item.discountedPrice) {
-            msg += '   ~~' + formatPrice(product.price) + '~~ ' + formatPrice(item.discountedPrice) + ' (deal)\n';
-        } else {
-            msg += '   ' + formatPrice(product.price) + '\n';
+    return 'Trip ' + tripId + ' has been cancelled.\n\n' +
+           'No charges applied.\n' +
+           'Say "I need a ride" to book another.';
+}
+
+function buildEmergency(session) {
+    // In production, this would send alerts to emergency contact + police
+    let msg = '*EMERGENCY ALERT ACTIVATED*\n\n';
+    msg += 'We have notified:\n';
+    msg += '- Emergency services\n';
+    msg += '- Your emergency contact (if set)\n';
+    msg += '- Admin\n\n';
+
+    if (session.currentTrip) {
+        const trip = activeTrips[session.currentTrip];
+        if (trip) {
+            msg += 'Your trip details have been shared:\n';
+            msg += 'Trip ID: ' + trip.id + '\n';
+            msg += 'Rider: ' + riders[trip.riderId]?.name + '\n';
+            msg += 'From: ' + LOCATIONS[trip.pickup]?.name + '\n';
+            msg += 'To: ' + LOCATIONS[trip.dropoff]?.name + '\n\n';
         }
-        msg += '   Qty: ' + item.qty + ' = ' + formatPrice(subtotal) + '\n\n';
-    });
-
-    let finalTotal = total;
-    if (session.discountCode && DISCOUNT_CODES[session.discountCode]) {
-        const discount = DISCOUNT_CODES[session.discountCode];
-        const savings = Math.round(total * discount.discount);
-        finalTotal = total - savings;
-        msg += 'Subtotal: ' + formatPrice(total) + '\n';
-        msg += 'Discount (' + session.discountCode + '): -' + formatPrice(savings) + '\n';
     }
 
-    msg += '\n*Total: ' + formatPrice(finalTotal) + '*\n\n';
-    msg += 'Say "checkout" to place order\n';
-    msg += 'Or "apply code [CODE]" for discount';
+    msg += '*Call Emergency: ' + EMERGENCY_NUMBER + '*\n\n';
+    msg += 'Stay safe. Help is on the way.';
+
+    // Log emergency for admin
+    console.log('EMERGENCY ALERT from ' + session.phone);
 
     return msg;
-}
-
-function addToCart(product, qty, session, discountedPrice) {
-    if (!product.inStock) return 'Sorry, ' + product.name + ' is currently out of stock.';
-
-    const existing = session.cart.find(item => item.id === product.id);
-    if (existing) {
-        existing.qty += qty;
-        if (discountedPrice) existing.discountedPrice = discountedPrice;
-    } else {
-        session.cart.push({ id: product.id, qty, discountedPrice: discountedPrice || null });
-    }
-
-    let msg = 'Added ' + qty + ' x ' + product.name;
-    if (discountedPrice) {
-        msg += ' at ' + formatPrice(discountedPrice) + ' (deal price)';
-    }
-    msg += '!\n\n';
-    msg += 'Say "view cart" to see items\n';
-    msg += 'Or type another product name to add more';
-    return msg;
-}
-
-function removeFromCart(input, session) {
-    const index = parseInt(input) - 1;
-    if (isNaN(index) || index < 0 || index >= session.cart.length) {
-        return 'Invalid item number. Say "view cart" to see your items.';
-    }
-    const removed = session.cart.splice(index, 1)[0];
-    const product = PRODUCTS.find(p => p.id === removed.id);
-    return 'Removed ' + product.name + ' from cart.';
-}
-
-function applyDiscountCode(code, session) {
-    const upperCode = code.toUpperCase();
-
-    if (!DISCOUNT_CODES[upperCode]) {
-        let msg = 'Invalid discount code.\n\n';
-        msg += 'Available codes:\n';
-        Object.entries(DISCOUNT_CODES).forEach(([code, info]) => {
-            msg += code + ' - ' + info.description + '\n';
-        });
-        return msg;
-    }
-
-    session.discountCode = upperCode;
-    return 'Discount code ' + upperCode + ' applied!\n' +
-           DISCOUNT_CODES[upperCode].description + '\n\n' +
-           'Say "view cart" to see updated total.';
-}
-
-function doCheckout(session) {
-    if (!session.cart || session.cart.length === 0) {
-        return 'Your cart is empty. Type a product name to start shopping!';
-    }
-
-    let total = 0;
-    let orderDetails = '';
-
-    session.cart.forEach(item => {
-        const product = PRODUCTS.find(p => p.id === item.id);
-        const price = item.discountedPrice || product.price;
-        const subtotal = price * item.qty;
-        total += subtotal;
-        orderDetails += product.name + ' x ' + item.qty + ' = ' + formatPrice(subtotal) + '\n';
-    });
-
-    let finalTotal = total;
-    let discountInfo = '';
-    if (session.discountCode && DISCOUNT_CODES[session.discountCode]) {
-        const discount = DISCOUNT_CODES[session.discountCode];
-        const savings = Math.round(total * discount.discount);
-        finalTotal = total - savings;
-        discountInfo = 'Discount (' + session.discountCode + '): -' + formatPrice(savings) + '\n';
-    }
-
-    const orderId = 'ORD-' + Date.now().toString().slice(-6);
-    session.orderHistory.push({ 
-        id: orderId, 
-        items: [...session.cart], 
-        total: finalTotal, 
-        originalTotal: total,
-        discountCode: session.discountCode,
-        date: new Date() 
-    });
-
-    session.cart = [];
-    session.discountCode = null;
-
-    let msg = '*Order Placed Successfully!*\n\n';
-    msg += 'Order ID: ' + orderId + '\n';
-    msg += 'Items:\n' + orderDetails + '\n';
-    if (discountInfo) msg += discountInfo + '\n';
-    msg += '*Total: ' + formatPrice(finalTotal) + '*\n\n';
-    msg += 'Payment Options:\n' + PAYMENT_METHODS.join('\n') + '\n\n';
-    msg += 'Send payment confirmation to +' + OWNER_NUMBER;
-
-    return msg;
-}
-
-// BARGAINING FUNCTION
-function handleBargain(productName, offeredPrice, session) {
-    const product = findProduct(productName);
-
-    if (!product) {
-        return 'Sorry, I could not find "' + productName + '".\n\n' +
-               'Type "show products" to see what we have.';
-    }
-
-    if (!product.inStock) {
-        return 'Sorry, ' + product.name + ' is currently out of stock.';
-    }
-
-    if (!product.allowDiscount) {
-        return 'Sorry, ' + product.name + ' is fixed at ' + formatPrice(product.price) + '.\n' +
-               'No discounts available on this item.';
-    }
-
-    // Check if offered price is acceptable
-    if (offeredPrice >= product.minPrice) {
-        // Accept the offer
-        const savings = product.price - offeredPrice;
-        const existing = session.cart.find(item => item.id === product.id);
-
-        if (existing) {
-            existing.discountedPrice = offeredPrice;
-            existing.qty = 1;
-        } else {
-            session.cart.push({ id: product.id, qty: 1, discountedPrice: offeredPrice });
-        }
-
-        return '*Deal!* ' + product.name + ' for ' + formatPrice(offeredPrice) + '\n' +
-               'You saved ' + formatPrice(savings) + '!\n\n' +
-               'Added to your cart.\n' +
-               'Say "view cart" to checkout or type another product.';
-    } else {
-        // Counter offer
-        const counterPrice = Math.round((product.price + offeredPrice) / 2);
-        if (counterPrice < product.minPrice) {
-            return 'Sorry, ' + formatPrice(offeredPrice) + ' is too low for ' + product.name + '.\n\n' +
-                   'Lowest I can go: ' + formatPrice(product.minPrice) + '\n\n' +
-                   'Type: "' + product.name + ' ' + product.minPrice + '" to accept minimum price.';
-        }
-
-        session.bargainingProduct = product.id;
-
-        return 'Hmm, ' + formatPrice(offeredPrice) + ' is too low for ' + product.name + '.\n\n' +
-               'How about ' + formatPrice(counterPrice) + '?\n\n' +
-               'Reply:\n' +
-               '"yes" - to accept ' + formatPrice(counterPrice) + '\n' +
-               '"' + product.name + ' [price]" - to counter offer';
-    }
-}
-
-function acceptCounterOffer(session) {
-    if (!session.bargainingProduct) {
-        return 'No active bargain. Type a product name to start shopping.';
-    }
-
-    const product = PRODUCTS.find(p => p.id === session.bargainingProduct);
-    if (!product) return 'Product not found.';
-
-    // Calculate the counter price that was offered
-    const counterPrice = Math.round((product.price + product.minPrice) / 2);
-    const finalPrice = Math.max(counterPrice, product.minPrice);
-
-    const existing = session.cart.find(item => item.id === product.id);
-    if (existing) {
-        existing.discountedPrice = finalPrice;
-        existing.qty = 1;
-    } else {
-        session.cart.push({ id: product.id, qty: 1, discountedPrice: finalPrice });
-    }
-
-    session.bargainingProduct = null;
-
-    return '*Deal!* ' + product.name + ' for ' + formatPrice(finalPrice) + '\n\n' +
-           'Added to your cart.\n' +
-           'Say "view cart" to checkout or type another product.';
-}
-
-function buildHours() {
-    let msg = '*Business Hours*\n\n';
-    Object.entries(BUSINESS_HOURS).forEach(([day, hours]) => {
-        msg += day.charAt(0).toUpperCase() + day.slice(1) + ': ' + hours + '\n';
-    });
-    return msg;
-}
-
-function buildDelivery() {
-    return '*Delivery Information*\n\n' +
-           'Within Nairobi: KES 200\n' +
-           'Outside Nairobi: KES 500\n\n' +
-           'Delivery time: 1-3 business days\n' +
-           'Same-day delivery for orders before 2 PM';
-}
-
-function buildPayment() {
-    return '*Payment Methods*\n\n' + PAYMENT_METHODS.join('\n') + '\n\n' +
-           'After payment, send confirmation to this number.';
-}
-
-function buildContact() {
-    return '*Contact Us*\n\n' +
-           'Phone/WhatsApp: +' + OWNER_NUMBER + '\n' +
-           'Location: Nairobi, Kenya\n\n' +
-           'Say "I need help" to speak with a person.';
-}
-
-function buildFAQ() {
-    return '*Frequently Asked Questions*\n\n' +
-           'Q: How long does delivery take?\n' +
-           'A: 1-3 days in Nairobi\n\n' +
-           'Q: Can I return items?\n' +
-           'A: Yes, within 7 days with receipt\n\n' +
-           'Q: Do you offer discounts?\n' +
-           'A: Yes! Some products are negotiable.\n' +
-           '   Just type: "[product] [price]"\n\n' +
-           'Q: Minimum order amount?\n' +
-           'A: No minimum!';
 }
 
 function buildHelp() {
-    return '*How to Shop*\n\n' +
-           '*Browse:*\n' +
-           '- "show products" - See all products\n' +
-           '- "pricelist" - Get price list\n' +
-           '- "search [name]" - Find products\n\n' +
-           '*Buy (easiest):*\n' +
-           '- Just type product name: "laptop stand"\n' +
-           '- "i want earbuds"\n' +
-           '- "buy 2 phone case"\n\n' +
-           '*Bargain:*\n' +
-           '- "laptop stand 900"\n' +
-           '- "can I get earbuds for 1300"\n\n' +
-           '*Cart & Checkout:*\n' +
-           '- "view cart" - See your cart\n' +
-           '- "checkout" - Place order\n' +
-           '- "apply code BILLY10" - Discount\n\n' +
-           '*Info:*\n' +
-           '- "hours", "delivery", "payment"';
+    let msg = '*' + APP_NAME + ' - Help*\n\n';
+    msg += '*Book a ride:*\n';
+    msg += '- "I need a ride from [place] to [place]"\n';
+    msg += '- "book from Meru Town to Makutano"\n';
+    msg += '- "take me to Kaaga"\n\n';
+    msg += '*Check price:*\n';
+    msg += '- "price from [place] to [place]"\n';
+    msg += '- "how much to [place]"\n\n';
+    msg += '*Trip management:*\n';
+    msg += '- "trip status" - Check your ride\n';
+    msg += '- "cancel trip" - Cancel booking\n\n';
+    msg += '*Safety:*\n';
+    msg += '- "SOS" or "emergency" - Alert authorities\n';
+    msg += '- "share trip" - Share with family\n\n';
+    msg += '*Other:*\n';
+    msg += '- "locations" - See all areas\n';
+    msg += '- "night pricing" - Understand night rates\n';
+    msg += '- "help" - This menu';
+    return msg;
+}
+
+function buildNightPricing() {
+    let msg = '*Night Pricing Policy*\n\n';
+    msg += 'Night hours: 8:00 PM - 6:00 AM\n\n';
+    msg += 'Fair premium: *+20% only*\n\n';
+    msg += 'Example:\n';
+    msg += '- Meru Town to Kaaga (day): 150 KES\n';
+    msg += '- Meru Town to Kaaga (night): 180 KES\n\n';
+    msg += 'Why we do this:\n';
+    msg += '- Protects riders (higher risk at night)\n';
+    msg += '- Protects customers (no surprise charges)\n';
+    msg += '- Prevents exploitation\n\n';
+    msg += '*We guarantee: No rider can charge more than the app price!*';
+    return msg;
+}
+
+function buildShareTrip(session) {
+    if (!session.currentTrip) {
+        return 'You do not have an active trip to share.\n\n' +
+               'Book a ride first: "I need a ride from [place] to [place]"';
+    }
+
+    const trip = activeTrips[session.currentTrip];
+    const shareLink = 'https://saferide.meru/track/' + trip.id;
+
+    let msg = '*Share Your Trip*\n\n';
+    msg += 'Send this to your family/friend:\n\n';
+    msg += 'I am taking a SafeRide from ' + LOCATIONS[trip.pickup].name + 
+           ' to ' + LOCATIONS[trip.dropoff].name + '.\n';
+    msg += 'Track my trip: ' + shareLink + '\n';
+    msg += 'Trip ID: ' + trip.id + '\n';
+    msg += 'Rider: ' + riders[trip.riderId]?.name + '\n\n';
+    msg += 'They can see your live location and trip progress.';
+
+    return msg;
 }
 
 // ============================================
@@ -515,241 +448,120 @@ function processMessage(text, session) {
     const lowerText = text.toLowerCase();
 
     // Greetings
-    if (/^(hi|hello|hey|hola|yo|good morning|good afternoon|good evening|howdy)/i.test(text)) {
+    if (/^(hi|hello|hey|hola|good morning|good afternoon|good evening|start|menu)/i.test(text)) {
         return buildWelcome();
     }
 
     // Help
-    if (/^(help|menu|commands|how to|how do i|what can you do|show me how)/i.test(text)) {
+    if (/^(help|how to|how do i|commands|options)/i.test(text)) {
         return buildHelp();
     }
 
-    // Price list
-    if (/(pricelist|price list|send me prices|all prices|price catalog|prices)/i.test(text)) {
-        return buildPriceList();
+    // Locations
+    if (/(locations|areas|places|where do you go|which areas)/i.test(text)) {
+        return buildLocations();
     }
 
-    // Products
-    if (/(show products|what do you sell|list products|what do you have|what's available|show everything|catalog)/i.test(text)) {
-        return buildProducts();
-    }
-
-    // Categories
-    if (/(categories|types of products|what categories|sections)/i.test(text)) {
-        let msg = '*Categories*\n\n';
-        const cats = [...new Set(PRODUCTS.map(p => p.category))];
-        cats.forEach((cat, i) => {
-            const count = PRODUCTS.filter(p => p.category === cat).length;
-            msg += (i + 1) + '. ' + cat + ' (' + count + ' items)\n';
-        });
-        return msg;
-    }
-
-    // Search
-    const searchMatch = text.match(/(?:search|find|look for|do you have|got any)\s+(.+)/i);
-    if (searchMatch) {
-        return buildSearch(searchMatch[1].trim());
-    }
-
-    // Product details request
-    const detailMatch = text.match(/(?:tell me about|details on|info about|what is|describe)\s+(.+)/i);
-    if (detailMatch) {
-        const product = findProduct(detailMatch[1].trim());
-        if (product) return buildProductDetails(product);
-        return 'Sorry, I could not find "' + detailMatch[1] + '".';
-    }
-
-    // Price check
-    const priceMatch = text.match(/(?:how much is|what's the price of|price of|cost of|how much for)\s+(.+)/i);
+    // Price estimate
+    const priceMatch = text.match(/(?:price|how much|cost|fare)\s+(?:from\s+)?(.+?)\s+(?:to\s+)?(.+)/i);
     if (priceMatch) {
-        const product = findProduct(priceMatch[1].trim());
-        if (product) return buildProductDetails(product);
-        return 'Sorry, I could not find "' + priceMatch[1] + '".';
+        return buildPriceEstimate(priceMatch[1], priceMatch[2]);
     }
 
-    // Apply discount code
-    const codeMatch = text.match(/(?:apply code|use code|code|promo|coupon)\s+([a-z0-9]+)/i);
-    if (codeMatch) {
-        return applyDiscountCode(codeMatch[1], session);
+    // Book ride - various patterns
+    const bookPatterns = [
+        /(?:book|need|want|get|take)\s+(?:a\s+)?(?:ride|trip|boda|bodaboda)\s+(?:from\s+)?(.+?)\s+(?:to\s+)?(.+)/i,
+        /(?:take me|send me)\s+(?:to\s+)?(.+)/i,
+        /(?:i am|i'm)\s+(?:at|in)\s+(.+?)\s+(?:going|heading)\s+(?:to\s+)?(.+)/i
+    ];
+
+    for (const pattern of bookPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+            if (match[2]) {
+                return bookRide(session.phone + '@s.whatsapp.net', match[1], match[2], session);
+            } else {
+                // Pattern like "take me to Kaaga" - need to know current location
+                return 'Where are you now?\n\n' +
+                       'Say: "I need a ride from [your location] to ' + match[1] + '"';
+            }
+        }
     }
 
-    // View cart
-    if (/(view cart|show cart|my cart|what's in my cart|cart items)/i.test(text)) {
-        return buildCart(session);
+    // Simple "to [location]" when context exists
+    if (/^to\s+(.+)/i.test(text) && session.lastPickup) {
+        return bookRide(session.phone + '@s.whatsapp.net', session.lastPickup, text.match(/^to\s+(.+)/i)[1], session);
     }
 
-    // Remove from cart
-    const removeMatch = text.match(/(?:remove|delete|take out)\s+(?:item\s+)?(\d+|.+)/i);
-    if (removeMatch) {
-        return removeFromCart(removeMatch[1], session);
+    // Trip status
+    if (/(trip status|my ride|where is my rider|check trip)/i.test(text)) {
+        if (session.currentTrip) {
+            return getTripStatus(session.currentTrip);
+        }
+        return 'You do not have an active trip.\n\n' +
+               'Say: "I need a ride from [place] to [place]" to book.';
     }
 
-    // Checkout
-    if (/(checkout|place order|complete order|pay|i'm ready|finish order)/i.test(text)) {
-        return doCheckout(session);
+    // Cancel trip
+    if (/(cancel trip|cancel my ride|cancel booking)/i.test(text)) {
+        if (session.currentTrip) {
+            return cancelTrip(session.currentTrip, session);
+        }
+        return 'You do not have an active trip to cancel.';
     }
 
-    // Accept bargain counter
-    if (/^(yes|okay|ok|deal|sure|fine|accepted|accept)/i.test(text) && session.bargainingProduct) {
-        return acceptCounterOffer(session);
+    // Emergency / SOS
+    if (/(sos|emergency|help me|i am in danger|police|thief|robbery|attack)/i.test(text)) {
+        return buildEmergency(session);
     }
 
-    // Decline bargain
-    if (/^(no|nope|not interested|decline|pass)/i.test(text) && session.bargainingProduct) {
-        session.bargainingProduct = null;
-        return 'No problem! Type a product name to continue shopping or "show products" to browse.';
+    // Share trip
+    if (/(share trip|share my ride|send location|family tracking)/i.test(text)) {
+        return buildShareTrip(session);
     }
 
-    // Business hours
-    if (/(business hours|opening hours|when are you open|what time|hours of operation|are you open)/i.test(text)) {
-        return buildHours();
+    // Night pricing explanation
+    if (/(night pricing|night rate|why expensive at night|night charge)/i.test(text)) {
+        return buildNightPricing();
     }
 
-    // Location
-    if (/(where are you|location|address|where is the shop|how to find you|directions)/i.test(text)) {
-        return '*Our Location*\n\nNairobi, Kenya\n\nWe offer delivery services. Ask "do you deliver" for details.';
-    }
-
-    // Delivery
-    if (/(delivery|shipping|do you deliver|deliver to|send to|courier)/i.test(text)) {
-        return buildDelivery();
-    }
-
-    // Payment
-    if (/(payment|how do i pay|pay with|mpesa|bank transfer|cash|payment methods)/i.test(text)) {
-        return buildPayment();
-    }
-
-    // Contact
-    if (/(contact|phone|call|reach you|whatsapp|how to contact)/i.test(text)) {
-        return buildContact();
-    }
-
-    // FAQ
-    if (/(faq|frequently asked|common questions|questions)/i.test(text)) {
-        return buildFAQ();
-    }
-
-    // Track order
-    const trackMatch = text.match(/(?:track|status of|where is my|check)\s+(?:order\s+)?(ord-\d+|\d+)/i);
-    if (trackMatch) {
-        return '*Order Tracking: ' + trackMatch[1].toUpperCase() + '*\n\n' +
-               'Status: Out for Delivery\n' +
-               'Estimated: Today by 6 PM';
-    }
-
-    // Human support
-    if (/(human|person|real person|agent|representative|i need help|speak to someone|talk to someone|support)/i.test(text)) {
-        return '*Connecting to Human Support*\n\n' +
-               'A representative will contact you shortly.\n\n' +
-               'For urgent matters, call: +' + OWNER_NUMBER;
+    // Rider info (for demo/verification)
+    if (/(rider info|who is my rider|driver details|rider verification)/i.test(text)) {
+        if (session.currentTrip) {
+            const trip = activeTrips[session.currentTrip];
+            const rider = riders[trip.riderId];
+            if (rider) {
+                let msg = '*Your Rider*\n\n';
+                msg += 'Name: ' + rider.name + '\n';
+                msg += 'Rating: ' + rider.rating + '/5\n';
+                msg += 'Trips completed: ' + rider.trips + '\n';
+                msg += 'Verified: ' + (rider.verified ? 'Yes' : 'No') + '\n\n';
+                msg += 'If rider details do not match, say "SOS" immediately!';
+                return msg;
+            }
+        }
+        return 'No active rider information.';
     }
 
     // Thanks
-    if (/(thank|thanks|asante|shukran|grateful)/i.test(text)) {
-        return 'You are very welcome!\n\n' +
-               'Thanks for choosing ' + SHOP_NAME + '. Have a great day!\n\n' +
-               'Feel free to message anytime for more shopping.';
+    if (/(thank|thanks|asante|shukran)/i.test(text)) {
+        return 'You are welcome!\n\n' +
+               'Ride safe with ' + APP_NAME + '.\n' +
+               'Message us anytime you need a ride.';
     }
 
     // Goodbye
-    if (/(bye|goodbye|see you|later|talk soon|have a good one)/i.test(text)) {
-        return 'Goodbye! Thanks for visiting ' + SHOP_NAME + '.\n\n' +
-               'We are here whenever you need us. Have a wonderful day!';
+    if (/(bye|goodbye|see you|later)/i.test(text)) {
+        return 'Goodbye! Stay safe.\n\n' +
+               APP_NAME + ' is here whenever you need a ride.';
     }
 
-    // ============================================
-    // BARGAINING PATTERNS (check before direct product)
-    // ============================================
-
-    // Pattern: "product name price" (e.g., "laptop stand 900")
-    const bargainPattern1 = text.match(/^([a-z\s]+)\s+(\d+)$/i);
-    if (bargainPattern1) {
-        const productName = bargainPattern1[1].trim();
-        const offeredPrice = parseInt(bargainPattern1[2]);
-        const product = findProduct(productName);
-
-        if (product) {
-            return handleBargain(productName, offeredPrice, session);
-        }
-    }
-
-    // Pattern: "can I get [product] for/at [price]"
-    const bargainPattern2 = text.match(/(?:can i get|give me|sell me|how about|what about|i'll take)\s+(.+?)\s+(?:for|at)\s+(?:kes\s+)?(\d+)/i);
-    if (bargainPattern2) {
-        return handleBargain(bargainPattern2[1].trim(), parseInt(bargainPattern2[2]), session);
-    }
-
-    // Pattern: "discount on [product]"
-    const discountPattern = text.match(/(?:discount on|bargain for|cheaper price for|reduce price of)\s+(.+)/i);
-    if (discountPattern) {
-        const product = findProduct(discountPattern[1].trim());
-        if (!product) return 'Sorry, I could not find that product.';
-        if (!product.allowDiscount) return 'Sorry, ' + product.name + ' is fixed at ' + formatPrice(product.price) + '. No discounts available.';
-        if (!product.inStock) return 'Sorry, ' + product.name + ' is out of stock.';
-
-        session.bargainingProduct = product.id;
-        return '*' + product.name + '*\n\n' +
-               'Original price: ' + formatPrice(product.price) + '\n' +
-               'Lowest I can go: ' + formatPrice(product.minPrice) + '\n\n' +
-               'What price did you have in mind?\n' +
-               'Type: "' + product.name + ' [your price]"\n' +
-               'Example: "' + product.name + ' ' + (product.minPrice + 100) + '"';
-    }
-
-    // ============================================
-    // DIRECT PRODUCT NAME (e.g., "laptop stand", "earbuds")
-    // ============================================
-
-    const directProduct = findProduct(text);
-    if (directProduct) {
-        // Check if it's a buy request with quantity
-        const qtyMatch = text.match(/(\d+)\s*(?:pieces?|units?|qty)?/);
-        const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
-
-        return addToCart(directProduct, qty, session, null);
-    }
-
-    // Buy patterns with "i want", "buy", etc.
-    const buyPatterns = [
-        /^(?:i want|i'd like|give me|add|buy|purchase|get|need)\s+(.+)/i,
-        /^(?:add\s+)(\d+)\s+(?:of\s+)?(.+)/i,
-        /^(?:i want)\s+(\d+)\s+(?:pieces?|units?|qty|of)\s+(.+)/i
-    ];
-
-    for (const pattern of buyPatterns) {
-        const match = text.match(pattern);
-        if (match) {
-            let productInput, qty = 1;
-
-            if (match[2]) {
-                // Pattern with quantity and product
-                qty = parseInt(match[1]) || 1;
-                productInput = match[2].trim();
-            } else {
-                productInput = match[1].trim();
-            }
-
-            const product = findProduct(productInput);
-            if (product) {
-                return addToCart(product, qty, session, null);
-            }
-
-            // If product not found, suggest search
-            return 'Sorry, I could not find "' + productInput + '".\n\n' +
-                   'Type "show products" to see what we have, or "search [name]" to find items.';
-        }
-    }
-
-    // ============================================
-    // FALLBACK
-    // ============================================
-
-    return 'I am not sure I understood "' + text + '".\n\n' +
+    // Fallback
+    return 'I did not understand that.\n\n' +
            'Try:\n' +
-           '- Type a product name: "laptop stand"\n' +
-           '- "show products" to browse\n' +
-           '- "laptop stand 900" to bargain\n' +
+           '- "I need a ride from Meru Town to Makutano"\n' +
+           '- "price from Kaaga to Timau"\n' +
+           '- "locations" to see areas\n' +
            '- "help" for all options';
 }
 
@@ -758,7 +570,7 @@ function processMessage(text, session) {
 // ============================================
 
 async function startBot() {
-    console.log('Starting ' + SHOP_NAME + ' Bot...');
+    console.log('Starting ' + APP_NAME + '...');
     connectionStatus = 'connecting';
 
     const { state, saveCreds } = await useMultiFileAuthState('auth_info');
@@ -840,9 +652,9 @@ app.get('/', async (req, res) => {
     } else if (botReady) {
         qrHtml = '<div style="background:#d4edda;padding:30px;border-radius:16px;margin:20px 0;color:#155724;">' +
                  '<h2>Bot Connected!</h2>' +
-                 '<p>Your shop assistant is live.</p>' +
-                 '<p><strong>WhatsApp: +' + OWNER_NUMBER + '</strong></p>' +
-                 '<p>Location: Nairobi, Kenya</p>' +
+                 '<p>' + APP_NAME + ' is live.</p>' +
+                 '<p><strong>WhatsApp: +' + ADMIN_NUMBER + '</strong></p>' +
+                 '<p>Serving: Meru Town, Makutano, Kaaga, and more</p>' +
                  '</div>';
     } else {
         qrHtml = '<div style="background:#fff3cd;padding:30px;border-radius:16px;margin:20px 0;color:#856404;">' +
@@ -854,7 +666,7 @@ app.get('/', async (req, res) => {
 
     res.send('<!DOCTYPE html>' +
              '<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">' +
-             '<title>' + SHOP_NAME + '</title>' +
+             '<title>' + APP_NAME + '</title>' +
              '<style>' +
              'body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);min-height:100vh;display:flex;justify-content:center;align-items:center;padding:20px;margin:0;}' +
              '.container{background:white;border-radius:24px;padding:40px;max-width:500px;width:100%;text-align:center;box-shadow:0 25px 50px rgba(0,0,0,0.25);}' +
@@ -863,18 +675,25 @@ app.get('/', async (req, res) => {
              '.footer{margin-top:25px;padding-top:20px;border-top:1px solid #e9ecef;color:#888;font-size:12px;}' +
              '</style></head><body>' +
              '<div class="container">' +
-             '<div style="font-size:60px;margin-bottom:10px;">🏪</div>' +
-             '<h1>' + SHOP_NAME + '</h1>' +
-             '<p class="tagline">' + SHOP_NAME + ' - WhatsApp Shop</p>' +
+             '<div style="font-size:60px;margin-bottom:10px;">🏍️</div>' +
+             '<h1>' + APP_NAME + '</h1>' +
+             '<p class="tagline">Safe & Fair Boda Boda in Meru</p>' +
              qrHtml +
              '<div class="footer">' +
-             '<p>' + SHOP_NAME + ' - Conversational Commerce</p>' +
+             '<p>' + APP_NAME + ' - Ride Safe, Pay Fair</p>' +
              '<p>Built with Baileys</p>' +
              '</div></div></body></html>');
 });
 
 app.get('/api/status', (req, res) => {
-    res.json({ status: connectionStatus, botReady, owner: OWNER_NUMBER, shop: SHOP_NAME });
+    res.json({ 
+        status: connectionStatus, 
+        botReady, 
+        admin: ADMIN_NUMBER, 
+        app: APP_NAME,
+        activeTrips: Object.keys(activeTrips).length,
+        availableRiders: Object.values(riders).filter(r => r.status === 'available').length
+    });
 });
 
 app.get('/health', (req, res) => res.json({ status: 'ok', botReady }));
